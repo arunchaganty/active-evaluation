@@ -16,8 +16,9 @@ def do_snli(args):
 
     save_jsonl(args.output,
                ({"x": datum,
-                 "ys": [vmap[l] for l in datum['annotator_labels']],}
-                for datum in load_jsonl(args.input)))
+                 "y*": vmap.get(datum['gold_label'], 0.5),
+                 "ys": [vmap[l] for l in datum['annotator_labels']],
+                } for datum in load_jsonl(args.input)))
 
 if __name__ == "__main__":
     import argparse
