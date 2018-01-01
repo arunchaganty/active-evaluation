@@ -7,11 +7,29 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 
 from tqdm import tqdm, trange
 
-def weighted_average(xs, ws):
-    ret, w_acc = 0, 0
-    for x, w in zip(xs, ws):
-        ret += w*(x - ret)/(w_acc + w)
-        w_acc += w
+from .util import StatCounter
+
+def simple_estimator(data, seed=None):
+    rng = np.random.RandomState(seed)
+    rng.shuffle(data)
+
+    ret, stats = [], StatCounter()
+    for datum in data:
+        fh = datum['y']
+        stats += fh
+        ret.append([stats.mean, stats.var])
+    return ret
+
+def model_baseline_estimator(data, model, seed=None):
+    rng = np.random.RandomState(seed)
+    rng.shuffle(data)
+
+    ret, stats = [], StatCounter()
+    for datum in data:
+        fh = datum['y']
+        gh = model(datum)
+        stats += fh - gh
+        ret.append([stats.mean, stats.var])
     return ret
 
 def gaussian_process_estimator(X, y, X_old=None, y_old=None, kernel=None):
@@ -30,7 +48,7 @@ def gaussian_process_estimator(X, y, X_old=None, y_old=None, kernel=None):
             gp.fit(X[:i+1], y[:i+1])
 
         y_, std_ = gp.predict(X, return_std=True)
-        mu_ = weighted_average(y_, 1./(1+std_)**2)
+        mu_ = StatCounter(zip(y_, 1./(1+std_)**2)).mean
         mu_ = np.mean(y_)
         ret.append(mu_)
     return ret, gp
