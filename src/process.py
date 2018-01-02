@@ -5,7 +5,8 @@ Routines to pre-process datasets into a canonical format.
 """
 
 import sys
-from zipteedo.util import GzipFileType, load_jsonl, save_jsonl
+from zipteedo.util import GzipFileType
+from zipteedo.util import load_jsonl, save_jsonl, read_csv
 
 def do_snli(args):
     vmap = {
@@ -20,6 +21,13 @@ def do_snli(args):
                  "ys": [vmap[l] for l in datum['annotator_labels']],
                 } for datum in load_jsonl(args.input)))
 
+def do_acceptability(args):
+    save_jsonl(args.output,
+               ({"x": datum.text,
+                 "y*": float(datum.mean_rating),
+                 "ys": [float(l) for l in datum.rating_list.split(',')],
+                } for datum in read_csv(args.input)))
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Preprocess datasets.')
@@ -30,6 +38,11 @@ if __name__ == "__main__":
     command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="SNLI json file")
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="standardized data file")
     command_parser.set_defaults(func=do_snli)
+
+    command_parser = subparsers.add_parser('acceptability', help='Preprocess the acceptability dataset')
+    command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="Acceptability CSV file")
+    command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="standardized data file")
+    command_parser.set_defaults(func=do_acceptability)
 
     ARGS = parser.parse_args()
     if ARGS.func is None:
