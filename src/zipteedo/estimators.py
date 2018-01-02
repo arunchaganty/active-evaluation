@@ -9,31 +9,33 @@ from tqdm import tqdm, trange
 
 from .util import StatCounter
 
-def simple_estimator(data, seed=None):
-    rng = np.random.RandomState(seed)
-    rng.shuffle(data)
+def simple(_, **__):
+    def _ret(data, seed=None):
+        rng = np.random.RandomState(seed)
+        rng.shuffle(data)
 
-    ret, stats = [], StatCounter()
-    for datum in data:
-        fh = datum['y']
-        stats += fh
-        ret.append([stats.mean, stats.var])
-    return ret
+        fs = np.array([datum['y'] for datum in data])
+        ret = np.cumsum(fs) / np.arange(1, len(fs)+1)
+        return ret
+    return _ret
 
-def model_baseline_estimator(data, model, seed=None):
-    rng = np.random.RandomState(seed)
-    rng.shuffle(data)
+def model_baseline(model, baseline_samples=0.5, **_):
+    def _ret(data, seed=None):
+        rng = np.random.RandomState(seed)
+        rng.shuffle(data)
 
-    ret, stats = [], StatCounter()
-    for datum in data:
-        fh = datum['y']
-        gh = model(datum)
-        stats += fh - gh
-        ret.append([stats.mean, stats.var])
-    return ret
+        fs = np.array([datum['y'] for datum in data])
+        gs = model(data)
+        g0 = np.mean(gs[-int(len(data) * baseline_samples):])
 
+        ret = g0 + np.cumsum(fs - gs) / np.arange(1, len(fs)+1)
+        return ret
+
+    return _ret
+
+# TODO: make this into a standard estimator as above.
 def gaussian_process_estimator(X, y, X_old=None, y_old=None, kernel=None):
-    """
+    r"""
     @data is a set of [x,y] pairs.
     @returns a list with the current estimate of \E[y].
     """

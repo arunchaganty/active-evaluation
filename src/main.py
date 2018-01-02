@@ -13,21 +13,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm, trange
 
-from zipteedo.util import GzipFileType, load_jsonl
-from zipteedo import active
-from zipteedo import models
+from zipteedo.util import GzipFileType, load_jsonl, dictstr
+from zipteedo import estimators, models
 
 def get_model(args, data):
     model_factory = getattr(models, args.model)
-    return model_factory(data, **args.model_args)
+    return model_factory(data, **dict(args.model_args or []))
 
 def get_estimator(args, model):
-    if args.estimator == "simple":
-        return active.simple_estimator
-    if args.estimator == "model_baseline":
-        return active.model_baseline_estimator
+    estimator_factory = getattr(estimators, args.estimator)
+    return estimator_factory(model, **dict(args.estimator_args or []))
 
-def bootstrap_trajectory(data, estimator, model=None, realization_epochs=100, sampling_epochs=100):
+def bootstrap_trajectory(data, estimator, realization_epochs=10, sampling_epochs=100):
     # sufficiently large prime.
     ret = []
 
@@ -39,12 +36,12 @@ def bootstrap_trajectory(data, estimator, model=None, realization_epochs=100, sa
             datum['y'] = datum['ys'][idxs[i,j] % len(datum['ys'])]
 
         for j in trange(sampling_epochs, desc="Bootstraping samples of the data"):
-            estimate = estimator(data, model, seeds[i])
+            estimate = estimator(data, seeds[i])
             ret.append(estimate)
     return ret
 
 def apply_transforms(args, data):
-    if args.transform_no_ann:
+    if args.transform_gold_labels:
         for datum in data:
             datum['ys'] = [datum['y*']]
     return data
@@ -60,18 +57,20 @@ def do_simulate(args):
     estimator = get_estimator(args, model)
 
     # get trajectory
-    trajectory = np.array(bootstrap_trajectory(data, estimator))
+    trajectory = np.array(bootstrap_trajectory(data, estimator, args.num_realizations, args.num_samples))
     summary = list(zip(np.mean(trajectory, 0), np.percentile(trajectory, 10, 0), np.percentile(trajectory, 90, 0)))
 
     # Save output
     ret = {
         "transforms": {
-            "no-ann": args.transform_no_ann,
+            "gold_labels": args.transform_gold_labels,
             },
         "model": args.model,
-        "sampling": args.sampler,
+        "model_args": args.model_args,
+        "estimator": args.estimator,
+        "estimator_args": args.estimator_args,
         "summary": summary,
-        "trajectory": trajectory,
+        "trajectory": trajectory.tolist(),
         }
 
     json.dump(ret, args.output)
@@ -125,16 +124,18 @@ if __name__ == "__main__":
     command_parser = subparsers.add_parser('simulate', help='Simulates an evaluation model on some data')
     command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="Path to an input dataset.")
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="Path to output the evaluation trajectory.")
-    command_parser.add_argument('-Tp', '--transform-no-ann', action='store_true', default='False', help="Transform: no annotator noise.")
-    command_parser.add_argument('-M', '--model', type='str', default=None, help="Which model to use")
-    command_parser.add_argument('-S', '--sampler', type='str', default=None, help="Which sampler to use")
-    command_parser.add_argument('-Xm', '--model-args', type='str', nargs="+", default=None, help="Extra arguments for the model")
-    command_parser.add_argument('-Xe', '--estimator-args', type='str', nargs="+", default=None, help="Extra arguments for the estimator")
+    command_parser.add_argument('-Tg', '--transform-gold-labels', action='store_true', default='False', help="Transform: no annotator noise.")
+    command_parser.add_argument('-M', '--model', type=str, default=None, help="Which model to use")
+    command_parser.add_argument('-E', '--estimator', type=str, default=None, help="Which estimator to use")
+    command_parser.add_argument('-Xm', '--model-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the model")
+    command_parser.add_argument('-Xe', '--estimator-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the estimator")
+    command_parser.add_argument('-nR', '--num-realizations', type=int, default=10, help="Number of realizations of turker data")
+    command_parser.add_argument('-nS', '--num-samples', type=int, default=10, help="Number of realizations of sampling algorithm")
     command_parser.set_defaults(func=do_simulate)
 
     command_parser = subparsers.add_parser('plot', help='Plots a set of evaluation trajectories')
     command_parser.add_argument('-o', '--output', type=str, default='trajectory.pdf', help="Path to output the plot of evaluation trajectories.")
-    command_parser.add_argument('trajectories', type=GzipFileType('rt'), nargs='+', required=True, help="List of trajectory files to plot.")
+    command_parser.add_argument('trajectories', type=GzipFileType('rt'), nargs='+', help="List of trajectory files to plot.")
     command_parser.set_defaults(func=do_plot)
 
     ARGS = parser.parse_args()
