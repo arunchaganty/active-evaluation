@@ -25,9 +25,9 @@ def get_estimator(args, model):
     return estimator_factory(model, **dict(args.estimator_args or []))
 
 def bootstrap_trajectory(data, estimator, realization_epochs=10, sampling_epochs=100):
-    # sufficiently large prime.
-    ret = []
+    ret = np.zeros((realization_epochs * sampling_epochs, len(data)))
 
+    # sufficiently large prime.
     idxs = np.random.randint(0, 137, size=(realization_epochs, len(data)))
     seeds = np.random.randint(0,2**31, size=(sampling_epochs,))
     for i in trange(realization_epochs, desc="Bootstrapping realizations of the data"):
@@ -36,8 +36,7 @@ def bootstrap_trajectory(data, estimator, realization_epochs=10, sampling_epochs
             datum['y'] = datum['ys'][idxs[i,j] % len(datum['ys'])]
 
         for j in trange(sampling_epochs, desc="Bootstraping samples of the data"):
-            estimate = estimator(data, seeds[i])
-            ret.append(estimate)
+            ret[sampling_epochs*i + j, :] = estimator(data, seeds[i])
     return ret
 
 def apply_transforms(args, data):
@@ -53,6 +52,7 @@ def do_simulate(args):
     data = apply_transforms(args, data)
 
     # model.
+    truth = np.mean([datum['y*'] for datum in data])
     model = get_model(args, data)
     estimator = get_estimator(args, model)
 
@@ -69,8 +69,9 @@ def do_simulate(args):
         "model_args": args.model_args,
         "estimator": args.estimator,
         "estimator_args": args.estimator_args,
+        "truth": truth,
         "summary": summary,
-        "trajectory": trajectory.tolist(),
+        "trajectory": trajectory.tolist() if args.output_trajectory  else [],
         }
 
     json.dump(ret, args.output)
@@ -124,7 +125,8 @@ if __name__ == "__main__":
     command_parser = subparsers.add_parser('simulate', help='Simulates an evaluation model on some data')
     command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="Path to an input dataset.")
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="Path to output the evaluation trajectory.")
-    command_parser.add_argument('-Tg', '--transform-gold-labels', action='store_true', default='False', help="Transform: no annotator noise.")
+    command_parser.add_argument('-oT', '--output-trajectory', action='store_true', default=False, help="Save the trajectories too.")
+    command_parser.add_argument('-Tg', '--transform-gold-labels', action='store_true', default=False, help="Transform: no annotator noise.")
     command_parser.add_argument('-M', '--model', type=str, default=None, help="Which model to use")
     command_parser.add_argument('-E', '--estimator', type=str, default=None, help="Which estimator to use")
     command_parser.add_argument('-Xm', '--model-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the model")
