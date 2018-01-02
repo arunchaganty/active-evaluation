@@ -10,7 +10,6 @@ import sys
 import json
 
 import numpy as np
-import matplotlib.pyplot as plt
 from tqdm import tqdm, trange
 
 from zipteedo.util import GzipFileType, load_jsonl, dictstr
@@ -18,11 +17,11 @@ from zipteedo import estimators, models
 
 def get_model(args, data):
     model_factory = getattr(models, args.model)
-    return model_factory(data, **dict(args.model_args or []))
+    return model_factory(data, **args.model_args)
 
 def get_estimator(args, model):
     estimator_factory = getattr(estimators, args.estimator)
-    return estimator_factory(model, **dict(args.estimator_args or []))
+    return estimator_factory(model, **args.estimator_args)
 
 def bootstrap_trajectory(data, estimator, realization_epochs=10, sampling_epochs=100):
     ret = np.zeros((realization_epochs * sampling_epochs, len(data)))
@@ -46,6 +45,9 @@ def apply_transforms(args, data):
     return data
 
 def do_simulate(args):
+    args.model_args = dict(args.model_args or [])
+    args.estimator_args = dict(args.estimator_args or [])
+
     data = load_jsonl(args.input)
 
     # Apply dataset transforms:
@@ -58,7 +60,7 @@ def do_simulate(args):
 
     # get trajectory
     trajectory = np.array(bootstrap_trajectory(data, estimator, args.num_realizations, args.num_samples))
-    summary = list(zip(np.mean(trajectory, 0), np.percentile(trajectory, 10, 0), np.percentile(trajectory, 90, 0)))
+    summary = np.stack([np.mean(trajectory, 0), np.percentile(trajectory, 10, 0), np.percentile(trajectory, 90, 0)])
 
     # Save output
     ret = {
@@ -70,50 +72,54 @@ def do_simulate(args):
         "estimator": args.estimator,
         "estimator_args": args.estimator_args,
         "truth": truth,
-        "summary": summary,
+        "summary": summary.T.tolist(),
         "trajectory": trajectory.tolist() if args.output_trajectory  else [],
         }
 
     json.dump(ret, args.output)
 
+def make_label(obj):
+    ret = ""
+    if obj["model"] == "ConstantModel":
+        ret += "Constant (${:.2f}$)".format(obj["model_args"].get("cnst", 0.))
+    elif obj["model"] == "OracleModel":
+        ret += r"Oracle ($\rho={:.2f}$)".format(obj["model_args"].get("rho", 1.))
 
-def plot_agg(xs, mus, lower, higher, *args, color='b', **kwargs):
-    plt.plot(xs, mus, color=color, *args, **kwargs)
-    plt.plot(xs, lower, linestyle='--', color=color, alpha=0.5)
-    plt.plot(xs, higher, linestyle='--', color=color, alpha=0.5)
+    # TODO: add information about estimator
+    if obj["transforms"]["gold_labels"]:
+        ret += " (gold)"
+    return ret
+
+def apply_data_transform(args, obj, data):
+    if args.transform_mean:
+        data -= obj["truth"]
+    return data
 
 def do_plot(args):
-    pass
-    # simulate systems.
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import viridis
 
-    ## Expected value.
-    #writer = csv.writer(args.output_data)
-    #writer.writerow(["system", "i", "mean", "lower", "upper"])
+    colors = viridis.colors[::256//len(args.trajectories)]
 
-    #mu_0 = np.mean(ys)
-    #xs = np.arange(len(data))
-    #writer.writerow(['mean', 0, mu_0, mu_0, mu_0])
-    #plt.plot(xs, mu_0 * np.ones(len(data)), '--', label="Final value")
+    for i, trajectory in enumerate(args.trajectories):
+        trajectory = json.load(trajectory)
+        summary = np.array(trajectory["summary"])
+        apply_data_transform(args, trajectory, summary)
 
-    #mu, mu_l, mu_h = aggregate(data, random_sampling)
-    #writer.writerows((["random", i, mu[i], mu_l[i], mu_h[i]] for i in range(len(mu))))
-    #plot_agg(xs, mu, mu_l, mu_h, label="Random sampling")
+        xs = np.arange(1, len(summary)+1)
+        plt.plot(xs, summary.T[0], color=colors[i], label=make_label(trajectory), linewidth=0.5)
+        #plt.fill_between(xs, summary.T[1], summary.T[2], color=colors[i], alpha=0.3)
+        plt.plot(xs, summary.T[1], color=colors[i], alpha=0.3, linestyle=':', linewidth=0.5)
+        plt.plot(xs, summary.T[2], color=colors[i], alpha=0.3, linestyle=':', linewidth=0.5)
 
-    #for acc, color in zip([0.87, 0.5, 1.0], 'rgcym'):
-    #    yhs = np.random.binomial(1, acc, len(data))
-    #    ghs = [yh * y + (1-yh) * (1-y) for y, yh in zip(ys, yhs)]
-    #    print(np.mean(ghs))
-    #    mu, mu_l, mu_h = aggregate(data, lambda data: random_sampling_model(data, ghs))
-    #    writer.writerows((["model%.2f"%acc, i, mu[i], mu_l[i], mu_h[i]] for i in range(len(mu))))
-    #    plot_agg(xs, mu, mu_l, mu_h, color=color, label="Model-based random sampling (acc=%.2f)"%acc)
-
-    ##plt.xlim((0, len(data)))
-    #plt.xlim((0, 2000))
-    #plt.ylim((mu_0-0.1, mu_0+0.1))
-    #plt.legend()
-    #plt.rc('figure', figsize=(10, 10))
-    #plt.savefig(args.output_plot, dpi=300)
-    ##plt.show()
+    plt.rc("text", usetex=True)
+    plt.rc("figure", figsize=(10,10))
+    plt.xlabel("Samples")
+    plt.ylabel("Estimation error")
+    plt.xlim(1, args.xlim)
+    plt.ylim(-0.2, 0.2)
+    plt.legend()
+    plt.savefig(args.output, dpi=400)
 
 if __name__ == "__main__":
     import argparse
@@ -137,6 +143,8 @@ if __name__ == "__main__":
 
     command_parser = subparsers.add_parser('plot', help='Plots a set of evaluation trajectories')
     command_parser.add_argument('-o', '--output', type=str, default='trajectory.pdf', help="Path to output the plot of evaluation trajectories.")
+    command_parser.add_argument('--xlim', type=int, default=2000, help="Extent to which to plot")
+    command_parser.add_argument('-Tm', '--transform-mean', type=bool, default=True, help="Tranform data to mean")
     command_parser.add_argument('trajectories', type=GzipFileType('rt'), nargs='+', help="List of trajectory files to plot.")
     command_parser.set_defaults(func=do_plot)
 

@@ -24,7 +24,7 @@ def _get_flip_probability(ys, rho):
 
     return p
 
-def OracleModel(data, rho=1, use_gold=True):
+def OracleModel(data, rho=1.0, use_gold=True):
     if use_gold:
         ys = [datum['y*'] for datum in data]
     else:
@@ -39,7 +39,7 @@ def OracleModel(data, rho=1, use_gold=True):
             ys = np.array([datum['y*'] for datum in data])
         else:
             ys = np.array([datum['y'] for datum in data])
-        return cs * ys + (1-cs) * ys
+        return cs * ys + (1-cs) * (1-ys)
     return ret
 
 def ConstantModel(_, cnst=0.):
