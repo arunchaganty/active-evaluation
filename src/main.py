@@ -99,7 +99,7 @@ def do_plot(args):
     import matplotlib.pyplot as plt
     from matplotlib.cm import viridis
 
-    colors = viridis.colors[::256//len(args.trajectories)]
+    colors = viridis.colors[::256//(len(args.trajectories)-1)-1]
 
     for i, trajectory in enumerate(args.trajectories):
         trajectory = json.load(trajectory)
