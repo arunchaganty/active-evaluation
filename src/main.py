@@ -14,14 +14,17 @@ from tqdm import tqdm, trange
 
 from zipteedo.util import GzipFileType, load_jsonl, dictstr
 from zipteedo import estimators, models
+from zipteedo import wv
 
 def get_model(args, data):
-    model_factory = getattr(models, args.model)
-    return model_factory(data, **args.model_args)
+    if args.model:
+        model_factory = getattr(models, args.model)
+        return model_factory(data, **args.model_args)
 
 def get_estimator(args, model):
-    estimator_factory = getattr(estimators, args.estimator)
-    return estimator_factory(model, **args.estimator_args)
+    if args.estimator:
+        estimator_factory = getattr(estimators, args.estimator)
+        return estimator_factory(model, **args.estimator_args)
 
 def bootstrap_trajectory(data, estimator, realization_epochs=10, sampling_epochs=100):
     ret = np.zeros((realization_epochs * sampling_epochs, len(data)))
@@ -42,6 +45,13 @@ def apply_transforms(args, data):
     if args.transform_gold_labels:
         for datum in data:
             datum['ys'] = [datum['y*']]
+    # embed the data.
+    if args.transform_embed:
+        wvecs = wv.load_word_vector_mapping(args.embeddings_vocab, args.embeddings_vectors)
+        UNK = np.random.randn(50)
+        for datum in data:
+            datum['x_'] = sum(wvecs.get(word.lower(), UNK) for word in datum['x'].split(' '))
+
     return data
 
 def do_simulate(args):
@@ -117,7 +127,7 @@ def do_plot(args):
     plt.xlabel("Samples")
     plt.ylabel("Estimation error")
     plt.xlim(1, args.xlim)
-    plt.ylim(-0.2, 0.2)
+    #plt.ylim(-0.2, 0.2)
     plt.legend()
     plt.savefig(args.output, dpi=400)
 
@@ -125,6 +135,8 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Zipteedo: fast, economical human evaluation.')
     parser.add_argument('-s', '--seed', type=int, default=42, help="Random seed for experiments.")
+    parser.add_argument('-evo', '--embeddings-vocab',   type=argparse.FileType('r'), default="data/embeddings.vocab",   help="Path to word embedding vocabulary")
+    parser.add_argument('-eve', '--embeddings-vectors', type=argparse.FileType('r'), default="data/embeddings.vectors", help="Path to word vectors")
     parser.set_defaults(func=None)
 
     subparsers = parser.add_subparsers()
@@ -133,6 +145,7 @@ if __name__ == "__main__":
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="Path to output the evaluation trajectory.")
     command_parser.add_argument('-oT', '--output-trajectory', action='store_true', default=False, help="Save the trajectories too.")
     command_parser.add_argument('-Tg', '--transform-gold-labels', action='store_true', default=False, help="Transform: no annotator noise.")
+    command_parser.add_argument('-Te', '--transform-embed', action='store_true', default=False, help="Transform: add sentence embeddings.")
     command_parser.add_argument('-M', '--model', type=str, default=None, help="Which model to use")
     command_parser.add_argument('-E', '--estimator', type=str, default=None, help="Which estimator to use")
     command_parser.add_argument('-Xm', '--model-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the model")
