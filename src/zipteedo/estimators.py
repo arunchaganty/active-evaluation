@@ -19,7 +19,7 @@ def simple(_, **__):
         return ret
     return _ret
 
-def model_baseline(model, baseline_samples=0.5, **_):
+def model_baseline(model, data, baseline_samples=1.0, **_):
     def _ret(data, seed=None):
         rng = np.random.RandomState(seed)
         rng.shuffle(data)
