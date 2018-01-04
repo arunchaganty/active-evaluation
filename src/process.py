@@ -24,8 +24,8 @@ def do_snli(args):
 def do_acceptability(args):
     save_jsonl(args.output,
                ({"x": datum.text,
-                 "y*": float(datum.mean_rating),
-                 "ys": [float(l) for l in datum.rating_list.split(',')],
+                 "y*": (float(datum.mean_rating) - 1)/3,
+                 "ys": [(float(l)-1)/3 for l in datum.rating_list.split(',')],
                 } for datum in read_csv(args.input)))
 
 if __name__ == "__main__":

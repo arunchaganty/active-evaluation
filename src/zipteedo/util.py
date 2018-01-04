@@ -2,10 +2,13 @@
 Utility functions for zipteedo.
 """
 import csv
+import logging
 import json
 import gzip
 import argparse
-from collections import namedtuple
+from collections import namedtuple, Counter
+
+import tqdm
 
 def GzipFileType(*args, **kwargs):
     def _ret(path):
@@ -47,14 +50,9 @@ class StatCounter(object):
             self.update(vs)
 
     def update(self, values):
-        weight = 1
         for value in values:
-            #if isinstance(value, tuple):
-            #    assert len(value) == 2
-            #    value, weight = value
-            #else:
-            self._Z    += weight
-            self._mean += weight*(value - self._mean)/(self._Z)
+            self._Z    += 1
+            self._mean += (value - self._mean)/(self._Z)
 
     @property
     def mean(self):
@@ -67,7 +65,12 @@ class StatCounter(object):
     def clear(self):
         self._mean = self._Z = 0
 
-    def __iadd__(self, value, weight=1):
+    def __iadd__(self, value):
+        if isinstance(value, tuple):
+            value, weight = value
+        else:
+            value, weight = value, 1.
+
         self._Z    += weight
         self._mean += weight*(value - self._mean)/(self._Z)
 
@@ -152,3 +155,47 @@ def dictstr(x):
         return (k, trynumber(v))
     else:
         return (x, True)
+
+def build_dict(words, max_words=None, offset=0):
+    cnt = Counter(words)
+    if max_words:
+        words = cnt.most_common(max_words)
+    else:
+        words = cnt.most_common()
+    return {word: offset+i for i, (word, _) in enumerate(words)}
+
+def test_build_dict():
+    words = "a a b a b b a c b a c a".split()
+    tok2id = build_dict(words, max_words=2, offset=1)
+    assert tok2id.get('a') == 1
+    assert tok2id.get('b') == 2
+    assert tok2id.get('c') is None
+
+def invert_dict(tok2id):
+    """
+    Inverts a dictionary from tokens to ids.
+    """
+    ret = [None for _ in range(max(tok2id.values())+1)]
+    for k, v in tok2id.items():
+        ret[v] = k
+    return ret
+
+def test_invert_dict():
+    id2tok = "a b c d e f g".split()
+    tok2id = {t: i for i, t in enumerate(id2tok)}
+
+    id2tok_ = invert_dict(tok2id)
+
+    assert id2tok_ == id2tok
+
+class TqdmHandler(logging.StreamHandler):
+    def __init__(self):
+        logging.StreamHandler.__init__(self)
+
+    def emit(self, record):
+        msg = self.format(record)
+        tqdm.tqdm.write(msg)
+        self.flush()
+
+    def flush(self):
+        super().flush()

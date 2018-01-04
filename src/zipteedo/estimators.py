@@ -5,8 +5,8 @@ import pdb
 
 import numpy as np
 #from sklearn.gaussian_process import GaussianProcessRegressor, kernels
-import tensorflow as tf
-import gpflow
+#import tensorflow as tf
+#import gpflow
 from tqdm import tqdm, trange
 from .util import StatCounter
 
