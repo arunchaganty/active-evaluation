@@ -24,7 +24,6 @@ from zipteedo import wv
 from zipteedo.helper import Acceptability
 from zipteedo.util import GzipFileType, load_jsonl, dictstr
 from zipteedo.torch_utils import Dataset, train_model, run_model
-from zipteedo.vis import plot_trajectories
 
 logger = logging.getLogger(__name__)
 
