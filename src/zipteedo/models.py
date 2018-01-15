@@ -16,6 +16,7 @@ from torch.nn import functional as F
 from torch.nn.init import xavier_normal
 
 import numpy as np
+import scipy.stats
 
 logger = logging.getLogger(__name__)
 
@@ -28,20 +29,48 @@ def _get_flip_probability(ys, rho):
     sigma2 = np.std(ys)**2
     b = u * (1-u) / sigma2
     if rho > 0:
-        p = 0.5 + 0.5 * np.sqrt(1 - 2 * (1-rho**2)/(2 - rho**2 * b))
+        p = 0.5 + 0.5 * np.sqrt(1 - 2 * (1-rho)**2/(2 - rho**2 * b))
     else:
-        p = 0.5 - 0.5 * np.sqrt(1 - 2 * (1-rho**2)/(2 - rho**2 * b))
+        p = 0.5 - 0.5 * np.sqrt(1 - 2 * (1-rho)**2/(2 - rho**2 * b))
     assert p >= 0 and p <= 1
 
     return p
 
 def OracleModel(data, rho=1.0, use_gold=True):
     if use_gold:
+        ys = np.array([datum['y*'] for datum in data])
+    else:
+        ys = np.array([datum['y'] for datum in data])
+
+    sigma = np.std(ys)
+
+    alpha, beta = rho, np.sqrt(1 - rho**2) * sigma
+
+    ys_ = alpha * ys + beta * np.random.randn(len(ys))
+    logging.info("rho = %.3f vs %.3f; alpha=%.3f, beta=%.3f", scipy.stats.pearsonr(ys, ys_)[0], rho, alpha, beta)
+    logging.info("sigma_f = %.3f, sigma_g = %.3f", np.std(ys), np.std(ys_))
+
+    def ret(data):
+        if use_gold:
+            ys = np.array([datum['y*'] for datum in data])
+        else:
+            ys = np.array([datum['y'] for datum in data])
+        ys_ = alpha * ys + beta * np.random.randn(len(ys))
+        return ys_
+    return ret
+
+def OracleModelBinomial(data, rho=1.0, use_gold=True):
+    if use_gold:
         ys = [datum['y*'] for datum in data]
     else:
         ys = [datum['y'] for datum in data]
 
     p = _get_flip_probability(ys, rho)
+
+    cs = np.random.binomial(1, p, size=(len(data,)))
+    Y = np.array([datum['y*'] for datum in data])
+    Y_ = cs * Y + (1-cs) * (1-Y)
+    print("rho = {:.3f} vs {}".format(scipy.stats.pearsonr(Y, Y_)[0], rho))
 
     def ret(data):
         cs = np.random.binomial(1, p, size=(len(data,)))
@@ -52,6 +81,7 @@ def OracleModel(data, rho=1.0, use_gold=True):
             ys = np.array([datum['y'] for datum in data])
         return cs * ys + (1-cs) * (1-ys)
     return ret
+
 
 def ConstantModel(_, cnst=0.):
     def ret(data):
