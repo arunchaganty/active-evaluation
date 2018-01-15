@@ -26,7 +26,10 @@ def do_acceptability(args):
                ({"x": datum.text,
                  "y*": (float(datum.mean_rating) - 1)/3,
                  "ys": [(float(l)-1)/3 for l in datum.rating_list.split(',')],
-                } for datum in read_csv(args.input)))
+                 "system": datum.language,
+                } for datum in read_csv(args.input))
+              )
+
 
 if __name__ == "__main__":
     import argparse
@@ -43,6 +46,7 @@ if __name__ == "__main__":
     command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="Acceptability CSV file")
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="standardized data file")
     command_parser.set_defaults(func=do_acceptability)
+
 
     ARGS = parser.parse_args()
     if ARGS.func is None:
