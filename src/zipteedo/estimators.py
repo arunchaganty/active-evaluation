@@ -7,10 +7,11 @@ import numpy as np
 #from sklearn.gaussian_process import GaussianProcessRegressor, kernels
 #import tensorflow as tf
 #import gpflow
+import scipy.stats
 from tqdm import tqdm, trange
 from .util import StatCounter
 
-def simple(_, __, **___):
+def simple(_, **___):
     def _ret(data, seed=None):
         rng = np.random.RandomState(seed)
         rng.shuffle(data)
@@ -20,7 +21,7 @@ def simple(_, __, **___):
         return ret
     return _ret
 
-def model_baseline(model, data, baseline_samples=1.0, **_):
+def model_baseline(model, baseline_samples=1.0, **_):
     def _ret(data, seed=None):
         rng = np.random.RandomState(seed)
         rng.shuffle(data)
@@ -32,7 +33,42 @@ def model_baseline(model, data, baseline_samples=1.0, **_):
         ret = g0 + np.cumsum(fs - gs) / np.arange(1, len(fs)+1)
         return ret
 
-    return _ret, data
+    return _ret
+
+def model_optimal(model, baseline_samples=1.0, estimate_scale=True, **_):
+    def _ret(data, seed=None):
+        rng = np.random.RandomState(seed)
+        rng.shuffle(data)
+
+        N = len(data)
+
+        fs = np.array([datum['y'] for datum in data])
+        gs = model(data)
+        g0 = np.mean(gs[-int(len(data) * baseline_samples):])
+
+        # scale by rho*sigma_f/sigma_g
+        z = np.arange(1, N+1)
+        if estimate_scale:
+            mean_f = np.cumsum(fs) / z
+            mean_g = np.cumsum(gs) / z
+            mean_fg = np.cumsum(fs * gs) / z
+            var_g = np.cumsum(gs**2)/z - mean_g**2
+            var_g[var_g < 1e-5] = 1 # exception for this one case.
+            # scale factor = rho sigma_f/sigma_g
+            alpha = (mean_fg - mean_f * mean_g) / var_g
+            fs_t = np.array([np.mean((fs - alpha[t]*gs)[:t+1]) for t in range(N)])
+        else:
+            mean_f = np.mean(fs)
+            mean_g = np.mean(gs)
+            mean_fg = np.mean(fs * gs)
+            var_g = np.std(gs)
+            alpha = (mean_fg - mean_f * mean_g) / var_g
+            fs_t = fs - alpha
+
+        ret = alpha * g0 + fs_t
+        return ret
+
+    return _ret
 
 #def gaussian_process(_, wv_dim=50, **__):
 #    gp = GaussianProcessRegressor(kernel=kernels.DotProduct())
