@@ -135,6 +135,10 @@ def test_averager():
     assert avg.var == (0.25 - 0.25**2)
 
 def trynumber(x):
+    if x.lower() == "true":
+        return True
+    elif x.lower() == "false":
+        return False
     try:
         return int(x)
     except ValueError:

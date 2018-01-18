@@ -56,7 +56,7 @@ def OracleModel(data, rho=1.0, use_gold=True):
         else:
             ys = np.array([datum['y'] for datum in data])
         ys_ = alpha * ys + beta * np.random.randn(len(ys))
-        return ys_
+        return np.stack((ys_, abs(ys - ys_)), -1)
     return ret
 
 def OracleModelBinomial(data, rho=1.0, use_gold=True):
@@ -79,16 +79,22 @@ def OracleModelBinomial(data, rho=1.0, use_gold=True):
             ys = np.array([datum['y*'] for datum in data])
         else:
             ys = np.array([datum['y'] for datum in data])
-        return cs * ys + (1-cs) * (1-ys)
+        ys_ = cs * ys + (1-cs) * (1-ys)
+        return np.stack((ys_, abs(ys - ys_)), -1)
     return ret
 
 
-def ConstantModel(_, cnst=0.):
+def ConstantModel(_, cnst=0., use_gold=True):
     def ret(data):
-        return cnst * np.ones(len(data))
+        if use_gold:
+            ys = np.array([datum['y*'] for datum in data])
+        else:
+            ys = np.array([datum['y'] for datum in data])
+        ys_ = cnst * np.ones(len(data))
+
+        return np.stack((ys_, abs(ys - ys_)), -1)
 
     return ret
-
 
 class ConvModel(nn.Module):
     """
@@ -192,4 +198,5 @@ class ConvModel(nn.Module):
         y = self.U(self._dropout(x))
         #y = F.softmax(self.U(self._dropout(x)), -1)
 
+        # TODO: have a better predictor of confidence.
         return y

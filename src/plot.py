@@ -3,6 +3,7 @@
 """
 Plot various visualizations
 """
+import pdb
 import sys
 import json
 import numpy as np
@@ -55,19 +56,21 @@ def do_estimation_trajectory(args):
         # TODO: add information about estimator
         if obj['estimator'] == "model_optimal":
             ret += " w/scaling"
+        elif obj['estimator'] == "model_importance":
+            ret += " w/importance"
         if obj["transforms"]["gold_labels"]:
             ret += " (gold)"
         return ret
 
     def apply_data_transform(args, obj, data):
         if args.transform_mean:
-            data -= obj["truth"]
+            data = data - obj["truth"]
         return data
 
     colors = get_colors(len(args.systems))
     for i, trajectory in enumerate([json.load(system) for system in args.systems]):
         summary = np.array(trajectory["summary"])
-        apply_data_transform(args, trajectory, summary)
+        summary = apply_data_transform(args, trajectory, summary)
 
         xs = np.arange(1, len(summary)+1)
         plt.plot(xs, summary.T[0], color=colors[i], label=make_label(trajectory), linewidth=0.5)
@@ -80,7 +83,8 @@ def do_estimation_trajectory(args):
     plt.xlabel("Samples")
     plt.ylabel("Estimation error")
     plt.xlim(1, args.xlim)
-    plt.ylim(-0.1, 0.1)
+    if args.center:
+        plt.ylim(-0.1, 0.1)
     plt.legend()
     plt.tight_layout()
     plt.savefig(args.output, dpi=400)
@@ -100,6 +104,7 @@ if __name__ == "__main__":
     command_parser.add_argument('-o', '--output', type=str, default='trajectory.pdf', help="Path to output the plot of evaluation trajectories.")
     command_parser.add_argument('--xlim', type=int, default=2000, help="Extent to which to plot")
     command_parser.add_argument('-Tm', '--transform-mean', type=bool, default=True, help="Tranform data to mean")
+    command_parser.add_argument('-Xc', '--center', type=bool, default=True, help="Tranform data to mean")
     command_parser.add_argument('systems', type=GzipFileType('rt'), nargs='+', help="List of trajectory files to plot.")
     command_parser.set_defaults(func=do_estimation_trajectory)
 

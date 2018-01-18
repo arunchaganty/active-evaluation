@@ -205,13 +205,11 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Zipteedo: fast, economical human evaluation.')
     parser.add_argument('-s', '--seed', type=int, default=42, help="Random seed for experiments.")
-    parser.add_argument('-mp', '--model-path', default="out", help="Where to load/save models.")
-    parser.add_argument('-evo', '--embeddings-vocab',   type=argparse.FileType('r'), default="data/embeddings.vocab",   help="Path to word embedding vocabulary")
-    parser.add_argument('-eve', '--embeddings-vectors', type=argparse.FileType('r'), default="data/embeddings.vectors", help="Path to word vectors")
     parser.set_defaults(func=None)
 
     subparsers = parser.add_subparsers()
     command_parser = subparsers.add_parser('simulate', help='Simulates an evaluation model on some data')
+    command_parser.add_argument('-mp', '--model-path', default="out", help="Where to load/save models.")
     command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="Path to an input dataset.")
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="Path to output the evaluation trajectory.")
     command_parser.add_argument('-oT', '--output-trajectory', action='store_true', default=False, help="Save the trajectories too.")
@@ -226,6 +224,8 @@ if __name__ == "__main__":
     command_parser.set_defaults(func=do_simulate)
 
     command_parser = subparsers.add_parser('train', help='Trains an evaluation model on some data')
+    command_parser.add_argument('-evo', '--embeddings-vocab',   type=argparse.FileType('r'), default="data/embeddings.vocab",   help="Path to word embedding vocabulary")
+    command_parser.add_argument('-eve', '--embeddings-vectors', type=argparse.FileType('r'), default="data/embeddings.vectors", help="Path to word vectors")
     command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="Path to an input dataset.")
     command_parser.add_argument('-H', '--helper', type=str, required=True, help='Featurizer/Helper to use')
     command_parser.add_argument('-Xh', '--helper_args', type=dictstr, nargs="+", default=None, help='Features to use in the helper')
