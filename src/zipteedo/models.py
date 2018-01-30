@@ -37,11 +37,7 @@ def _get_flip_probability(ys, rho):
     return p
 
 def OracleModel(data, rho=1.0, use_gold=True):
-    if use_gold:
-        ys = np.array([datum['y*'] for datum in data])
-    else:
-        ys = np.array([datum['y'] for datum in data])
-
+    ys = np.array([datum['y*'] for datum in data])
     sigma = np.std(ys)
 
     alpha, beta = rho, np.sqrt(1 - rho**2) * sigma
@@ -50,13 +46,18 @@ def OracleModel(data, rho=1.0, use_gold=True):
     logging.info("rho = %.3f vs %.3f; alpha=%.3f, beta=%.3f", scipy.stats.pearsonr(ys, ys_)[0], rho, alpha, beta)
     logging.info("sigma_f = %.3f, sigma_g = %.3f", np.std(ys), np.std(ys_))
 
+    sigma_a = np.mean([np.std(datum['ys']) for datum in data])
+
     def ret(data):
         if use_gold:
             ys = np.array([datum['y*'] for datum in data])
         else:
             ys = np.array([datum['y'] for datum in data])
         ys_ = alpha * ys + beta * np.random.randn(len(ys))
-        return np.stack((ys_, abs(ys - ys_)), -1)
+
+        eps_ = np.sqrt(np.abs(ys - ys_)**2 + sigma_a**2)
+
+        return np.stack((ys_, eps_), -1)
     return ret
 
 def OracleModelBinomial(data, rho=1.0, use_gold=True):
@@ -84,15 +85,19 @@ def OracleModelBinomial(data, rho=1.0, use_gold=True):
     return ret
 
 
-def ConstantModel(_, cnst=0., use_gold=True):
+def ConstantModel(data, cnst=0., use_gold=True, lmb=0.):
+    sigma_a = np.mean([np.std(datum['y']) for datum in data])
+
     def ret(data):
         if use_gold:
             ys = np.array([datum['y*'] for datum in data])
         else:
-            ys = np.array([datum['y'] for datum in data])
+            ys = np.array([datum['ys'] for datum in data])
         ys_ = cnst * np.ones(len(data))
 
-        return np.stack((ys_, abs(ys - ys_)), -1)
+        eps_ = np.sqrt(np.abs(ys - ys_)**2 + sigma_a**2)
+
+        return np.stack((ys_, eps_), -1)
 
     return ret
 
