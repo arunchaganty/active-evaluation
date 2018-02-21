@@ -84,13 +84,14 @@ def apply_transforms(args, data):
 def do_simulate(args):
     args.estimator_args = dict(args.estimator_args or [])
     data = load_jsonl(args.input)
-    data_means = load_jsonl(args.input_means)
-    metric_ss = get_metric_ss(data_means)
+    data_means = load_jsonl(args.input_means) if args.input_means else None
+    metric_ss = get_metric_ss(data_means) if data_means else {}
 
     # project data.
     fs, gs, hs, anns = apply_transforms(args, data)
-    if args.data_metric == "gold":
-        args.estimator_args["_g0"], args.estimator_args["_var_g"] = np.mean(fs), np.var(fs)
+    if args.data_metric not in metric_ss:
+        logger.warning("USING DROP IN ESTIMATES FOR mu_g and var_g")
+        args.estimator_args["_g0"], args.estimator_args["_var_g"] = np.mean(gs), np.var(gs)
     else:
         args.estimator_args["_g0"], args.estimator_args["_var_g"] = metric_ss[args.data_metric][args.data_prompt][args.data_system]
 
