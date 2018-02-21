@@ -8,7 +8,7 @@ import numpy as np
 from tqdm import trange
 
 def simple(**_):
-    def _ret(_, __, hs):
+    def _ret(_, __, hs, anns):
         N = len(hs)
         z = np.arange(1, N+1)
 
@@ -17,7 +17,7 @@ def simple(**_):
     return _ret
 
 def model_variate(_g0=None, _var_g=None, estimate_scale=True, **_):
-    def _ret(_, gs, hs):
+    def _ret(_, gs, hs, anns):
         N = len(hs)
         z = np.arange(1, N+1)
 

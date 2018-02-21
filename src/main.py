@@ -42,7 +42,7 @@ def get_estimator(args):
         estimator_factory = getattr(estimators, args.estimator)
         return estimator_factory(**args.estimator_args)
 
-def bootstrap_trajectory(fs, gs, hs, estimator, epochs=1000):
+def bootstrap_trajectory(fs, gs, hs, anns, estimator, epochs=1000):
     N = len(fs)
     ret = np.zeros((epochs, N))
 
@@ -50,9 +50,11 @@ def bootstrap_trajectory(fs, gs, hs, estimator, epochs=1000):
     for i in trange(epochs, desc="bootstrapping"):
         # Get a set of random indices with replacement
         ixs, jxs = np.random.randint(0, N, (N,)), np.random.randint(0, N, (N,))
-        fs_, gs_, hs_ = fs[ixs], gs[ixs], np.array([hs[i][j % len(hs[i])] for i,j in zip(ixs,jxs)])
+        fs_, gs_ = fs[ixs], gs[ixs]
+        hs_ = np.array([hs[i][j % len(hs[i])] for i,j in zip(ixs,jxs)])
+        anns_ = np.array([anns[i][j % len(hs[i])] for i,j in zip(ixs,jxs)])
 
-        ret[i, :] = estimator(fs_, gs_, hs_)
+        ret[i, :] = estimator(fs_, gs_, hs_, anns_)
     return ret
 
 def apply_transforms(args, data):
@@ -61,21 +63,23 @@ def apply_transforms(args, data):
     metric = args.data_metric
     system = args.data_system
 
-    fs, gs, hs = [], [], []
+    fs, gs, hs, anns = [], [], [], []
 
-    for datum in data:
+    for i, datum in enumerate(data):
         if datum["system"] != system: continue
         vs = datum["prompts"][prompt]
-        f, g, h = vs["gold"], vs[metric], vs["human"]
+        f, g, h, ann = vs["gold"], vs[metric], vs["human"], datum["annotators"]
         if args.transform_gold_labels:
             h = [f]
+            ann = [i]
 
         fs.append(f)
         gs.append(g)
         hs.append(h)
-    assert fs and gs and hs, "Either {}, {} or {} does not exist".format(prompt, metric, system)
+        anns.append(ann)
+    assert fs and gs and hs and anns, "Either {}, {} or {} does not exist".format(prompt, metric, system)
 
-    return np.array(fs), np.array(gs), hs
+    return np.array(fs), np.array(gs), hs, anns
 
 def do_simulate(args):
     args.estimator_args = dict(args.estimator_args or [])
@@ -84,15 +88,18 @@ def do_simulate(args):
     metric_ss = get_metric_ss(data_means)
 
     # project data.
-    fs, gs, hs = apply_transforms(args, data)
-    args.estimator_args["_g0"], args.estimator_args["_var_g"] = metric_ss[args.data_metric][args.data_prompt][args.data_system]
+    fs, gs, hs, anns = apply_transforms(args, data)
+    if args.data_metric == "gold":
+        args.estimator_args["_g0"], args.estimator_args["_var_g"] = np.mean(fs), np.var(fs)
+    else:
+        args.estimator_args["_g0"], args.estimator_args["_var_g"] = metric_ss[args.data_metric][args.data_prompt][args.data_system]
 
     # model.
     truth = np.mean(fs)
     estimator = get_estimator(args)
 
     # get trajectory
-    trajectory = bootstrap_trajectory(fs, gs, hs, estimator, args.num_epochs)
+    trajectory = bootstrap_trajectory(fs, gs, hs, anns, estimator, args.num_epochs)
     summary = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)])
 
     # Save output
