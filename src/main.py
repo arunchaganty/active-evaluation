@@ -185,7 +185,7 @@ if __name__ == "__main__":
     subparsers = parser.add_subparsers()
     command_parser = subparsers.add_parser('simulate', help='Simulates an evaluation model on some data')
     command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="Path to an input dataset.")
-    command_parser.add_argument('-im', '--input-means', type=GzipFileType('rt'), default=sys.stdin, help="Path to an input dataset.")
+    command_parser.add_argument('-im', '--input-means', type=GzipFileType('rt'), default=None, help="Path to an input dataset.")
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="Path to output the evaluation trajectory.")
     command_parser.add_argument('-oT', '--output-trajectory', action='store_true', default=False, help="Save the trajectories too.")
     command_parser.add_argument('-Tg', '--transform-gold-labels', action='store_true', default=False, help="Transform: no annotator noise.")
