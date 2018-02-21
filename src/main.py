@@ -4,92 +4,103 @@
 Main routine for zipteedo.
 """
 import pdb
-import csv
 
-import gc
 import os
 import sys
 import json
 
 import logging
 import logging.config
+from collections import defaultdict
 
 import numpy as np
 from tqdm import tqdm, trange
 
-import torch
-
-from zipteedo import estimators, models
-from zipteedo import wv
-from zipteedo.helper import Acceptability
-from zipteedo.util import GzipFileType, load_jsonl, dictstr
-from zipteedo.torch_utils import Dataset, train_model, run_model
+from zipteedo import estimators
+from zipteedo.util import GzipFileType, load_jsonl, dictstr, first, save_jsonl
 
 logger = logging.getLogger(__name__)
 
-def get_model(args, data):
-    if args.model:
-        model_factory = getattr(models, args.model)
-        return model_factory(data, **args.model_args)
+def get_metric_ss(data):
+    ret = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
 
-def get_estimator(args, model):
+    for datum in tqdm(data, desc="metric ss"):
+        system = datum['system']
+        for prompt, vs in datum["prompts"].items():
+            for metric, v in vs.items():
+                ret[metric][prompt][system].append(v)
+
+    for metric in ret:
+        for prompt in ret[metric]:
+            for system in ret[metric][prompt]:
+                ret[metric][prompt][system] = np.mean(ret[metric][prompt][system]), np.var(ret[metric][prompt][system])
+
+    return ret
+
+def get_estimator(args):
     if args.estimator:
         estimator_factory = getattr(estimators, args.estimator)
-        return estimator_factory(model, **args.estimator_args)
+        return estimator_factory(**args.estimator_args)
 
-def bootstrap_trajectory(data, estimator, realization_epochs=10, sampling_epochs=100):
-    ret = np.zeros((realization_epochs * sampling_epochs, len(data)))
+def bootstrap_trajectory(fs, gs, hs, estimator, epochs=1000):
+    N = len(fs)
+    ret = np.zeros((epochs, N))
 
-    # sufficiently large prime.
-    idxs = np.random.randint(0, 137, size=(realization_epochs, len(data)))
-    seeds = np.random.randint(0,2**31, size=(sampling_epochs,))
-    for i in trange(realization_epochs, desc="Bootstrapping realizations of the data"):
-        # Construct a realization of the data.
-        for j, datum in enumerate(data):
-            datum['y'] = datum['ys'][idxs[i,j] % len(datum['ys'])]
+    # Create a bootstrap sample of fs, gs, and hs
+    for i in trange(epochs, desc="bootstrapping"):
+        # Get a set of random indices with replacement
+        ixs, jxs = np.random.randint(0, N, (N,)), np.random.randint(0, N, (N,))
+        fs_, gs_, hs_ = fs[ixs], gs[ixs], np.array([hs[i][j % len(hs[i])] for i,j in zip(ixs,jxs)])
 
-        for j in trange(sampling_epochs, desc="Bootstraping samples of the data"):
-            ret[sampling_epochs*i + j, :] = estimator(data, seeds[i])
+        ret[i, :] = estimator(fs_, gs_, hs_)
     return ret
 
 def apply_transforms(args, data):
-    if args.transform_gold_labels:
-        for datum in data:
-            datum['ys'] = [datum['y*']]
-    # embed the data.
-    if args.transform_embed:
-        wvecs = wv.load_word_vector_mapping(args.embeddings_vocab, args.embeddings_vectors)
-        UNK = np.random.randn(50)
-        for datum in data:
-            datum['x_'] = sum(wvecs.get(word.lower(), UNK) for word in datum['x'].split(' '))
+    # Restrict data to this given prompt, metric and system
+    prompt = args.data_prompt
+    metric = args.data_metric
+    system = args.data_system
 
-    return data
+    fs, gs, hs = [], [], []
+
+    for datum in data:
+        if datum["system"] != system: continue
+        vs = datum["prompts"][prompt]
+        f, g, h = vs["gold"], vs[metric], vs["human"]
+        if args.transform_gold_labels:
+            h = [f]
+
+        fs.append(f)
+        gs.append(g)
+        hs.append(h)
+    assert fs and gs and hs, "Either {}, {} or {} does not exist".format(prompt, metric, system)
+
+    return np.array(fs), np.array(gs), hs
 
 def do_simulate(args):
-    args.model_args = dict(args.model_args or [])
     args.estimator_args = dict(args.estimator_args or [])
-
     data = load_jsonl(args.input)
+    data_means = load_jsonl(args.input_means)
+    metric_ss = get_metric_ss(data_means)
 
-    # Apply dataset transforms:
-    data = apply_transforms(args, data)
+    # project data.
+    fs, gs, hs = apply_transforms(args, data)
+    args.estimator_args["_g0"], args.estimator_args["_var_g"] = metric_ss[args.data_metric][args.data_prompt][args.data_system]
 
     # model.
-    truth = np.mean([datum['y*'] for datum in data])
-    model = get_model(args, data)
-    estimator = get_estimator(args, model)
+    truth = np.mean(fs)
+    estimator = get_estimator(args)
 
     # get trajectory
-    trajectory = np.array(bootstrap_trajectory(data, estimator, args.num_realizations, args.num_samples))
-    summary = np.stack([np.mean(trajectory, 0), np.percentile(trajectory, 10, 0), np.percentile(trajectory, 90, 0)])
+    trajectory = bootstrap_trajectory(fs, gs, hs, estimator, args.num_epochs)
+    summary = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)])
 
     # Save output
     ret = {
-        "transforms": {
-            "gold_labels": args.transform_gold_labels,
-            },
-        "model": args.model,
-        "model_args": args.model_args,
+        "prompt": args.data_prompt,
+        "metric": args.data_metric,
+        "system": args.data_system,
+        "use_gold": args.transform_gold_labels,
         "estimator": args.estimator,
         "estimator_args": args.estimator_args,
         "truth": truth,
@@ -99,105 +110,61 @@ def do_simulate(args):
 
     json.dump(ret, args.output)
 
-def apply_data_transform(args, obj, data):
-    if args.transform_mean:
-        data -= obj["truth"]
-    return data
+def report_trajectory(args, truth, summary):
+    return {
+        "prompt": args.data_prompt,
+        "metric": args.data_metric,
+        "system": args.data_system,
+        "use_gold": args.transform_gold_labels,
+        "estimator": args.estimator,
+        "estimator_args": args.estimator_args,
+        "truth": truth,
+        "summary": summary.tolist(),
+        }
 
-def split(dataset, train=0.8):
-    """
-    Splits the dataset into train and test.
-    """
-    pivot = int(len(dataset) * train)
-    return dataset[:pivot], dataset[pivot:]
+def do_build_table(args):
+    args.estimator_args = dict(args.estimator_args or [])
+    data = load_jsonl(args.input)
+    data_means = load_jsonl(args.input_means)
+    metric_ss = get_metric_ss(data_means)
 
-def cross_validate(dataset, fn, splits=5, iters=None, start=0, **kwargs):
-    block_size = len(dataset)//splits
+    prompts = list(first(data)["prompts"])
+    metrics = list(first(first(data)["prompts"].values()))
+    metrics.remove('human')
+    systems = sorted({datum["system"] for datum in data})
+    systems.remove('reference')
 
-    if iters is None:
-        iters = splits
+    trajectories = []
+    settings = [(metric, prompt, system) for metric in metrics for prompt in prompts for system in systems]
+    for metric, prompt, system in tqdm(settings, desc="settings"):
+        args.data_prompt = prompt
+        args.data_metric = metric
+        args.data_system = system
 
-    it = trange(start, min(splits, start+iters), desc="Cross-validation")
 
-    train_loss, dev_loss, output = [], [], []
-    for i in it:
-        train = dataset[:i*block_size] + dataset[(i+1)*block_size:]
-        dev = dataset[i*block_size:(i+1)*block_size]
+        # project data.
+        fs, gs, hs = apply_transforms(args, data)
 
-        _, output_, train_loss_, dev_loss_ = fn(train, dev, **kwargs)
-        output.extend(output_)
-        train_loss.append(train_loss_)
-        dev_loss.append(dev_loss_)
+        if metric in metric_ss:
+            args.estimator_args["_g0"], args.estimator_args["_var_g"] = metric_ss[metric][prompt][system]
+        else:
+            args.estimator_args["_g0"], args.estimator_args["_var_g"] = np.mean(gs), np.var(gs)
 
-        it.set_postfix(loss="{:.3f}".format(dev_loss_))
+        # model.
+        truth = np.mean(fs)
 
-    return output, np.array(train_loss), np.array(dev_loss)
+        args.estimator = "simple"
+        trajectory = bootstrap_trajectory(fs, gs, hs, get_estimator(args), args.num_epochs)
+        simple = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)]).T
+        trajectories.append(report_trajectory(args, truth, simple))
 
-def run_split(train_raw, dev_raw, helper, model_class, config, use_cuda=False, n_epochs=15):
-    gc.collect()
-    train = Dataset(train_raw)
-    dev = dev_raw and Dataset(dev_raw)
+        args.estimator = "model_variate"
+        trajectory = bootstrap_trajectory(fs, gs, hs, get_estimator(args), args.num_epochs)
+        mv = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)]).T
 
-    # (d) Train model
-    model = model_class(config, helper.embeddings)
-    model, train_loss, dev_loss = train_model(model, train, dev, use_cuda=use_cuda, n_epochs=n_epochs)
-    output = run_model(model, dev, use_cuda) if dev else []
+        trajectories.append(report_trajectory(args, truth, mv))
 
-    return model, output, train_loss, dev_loss
-
-def write_stats(stats, f):
-    writer = csv.writer(f, delimiter="\t")
-    writer.writerow(["split",] + sorted([
-        "train_loss",
-        "dev_loss",
-        ]))
-    for i, row in enumerate(stats):
-        writer.writerow([i,] + row.tolist())
-    writer.writerow(["mean",] + np.mean(stats,0).tolist())
-
-def do_train(args):
-    # (a) Load data and embeddings
-    helper_args = dict(args.helper_args or [])
-    model_args = dict(args.model_args or [])
-    train_data = load_jsonl(args.input)
-
-    helper = Acceptability.build(train_data, **helper_args)
-    helper.add_embeddings(args.embeddings_vocab, args.embeddings_vectors)
-
-    # (b) Get model and configure it.
-    Model = models.ConvModel
-    config = Model.make_config()
-    config.update(model_args)
-    config.update({"n_features": helper.n_features, "vocab_dim": helper.vocab_dim, "embed_dim": helper.embed_dim})
-
-    with open(os.path.join(args.model_path, "helper.pkl"), "wb") as f:
-        helper.save(f)
-    with open(os.path.join(args.model_path, "model.config"), "w") as f:
-        json.dump(config, f)
-
-    # (c) Vectorize the data.
-    train = helper.vectorize(train_data)
-
-    # Cross-validation information.
-    if args.cross_validation_iters > 0:
-        dev_output, train_stats, dev_stats = cross_validate(
-            train, run_split,
-            splits=args.cross_validation_splits,
-            iters=args.cross_validation_iters,
-            start=args.cross_validation_start,
-            model_class=Model, config=config, helper=helper,
-            n_epochs=args.n_epochs)
-        logger.info("Final cross-validated train stats: %s", np.mean(train_stats,0))
-        logger.info("Final cross-validated dev stats: %s", np.mean(dev_stats,0))
-
-        with open(os.path.join(args.model_path, "scores"), "w") as f:
-            write_stats(np.stack([train_stats, dev_stats]), f)
-
-        with open(os.path.join(args.model_path, "predictions.jsonl"), 'w') as f:
-            for datum, (y_,) in zip(train_data, dev_output):
-                datum['y^'] = y_
-                json.dump(datum, f)
-                f.write("\n")
+    save_jsonl(args.output, trajectories)
 
 if __name__ == "__main__":
     logging.config.fileConfig('logging_config.ini')
@@ -209,43 +176,38 @@ if __name__ == "__main__":
 
     subparsers = parser.add_subparsers()
     command_parser = subparsers.add_parser('simulate', help='Simulates an evaluation model on some data')
-    command_parser.add_argument('-mp', '--model-path', default="out", help="Where to load/save models.")
     command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="Path to an input dataset.")
+    command_parser.add_argument('-im', '--input-means', type=GzipFileType('rt'), default=sys.stdin, help="Path to an input dataset.")
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="Path to output the evaluation trajectory.")
     command_parser.add_argument('-oT', '--output-trajectory', action='store_true', default=False, help="Save the trajectories too.")
     command_parser.add_argument('-Tg', '--transform-gold-labels', action='store_true', default=False, help="Transform: no annotator noise.")
-    command_parser.add_argument('-Te', '--transform-embed', action='store_true', default=False, help="Transform: add sentence embeddings.")
-    command_parser.add_argument('-M', '--model', type=str, default=None, help="Which model to use")
     command_parser.add_argument('-E', '--estimator', type=str, default=None, help="Which estimator to use")
-    command_parser.add_argument('-Xm', '--model-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the model")
     command_parser.add_argument('-Xe', '--estimator-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the estimator")
-    command_parser.add_argument('-nR', '--num-realizations', type=int, default=10, help="Number of realizations of turker data")
-    command_parser.add_argument('-nS', '--num-samples', type=int, default=10, help="Number of realizations of sampling algorithm")
+    command_parser.add_argument('-nE', '--num-epochs', type=int, default=100, help="Number of epochs")
+
+    command_parser.add_argument('-Dp', '--data-prompt', type=str, help="Which prompt to compute trajectory on")
+    command_parser.add_argument('-Dm', '--data-metric', type=str, help="Which automatic-metric to use")
+    command_parser.add_argument('-Ds', '--data-system', type=str, help="Which system to use")
     command_parser.set_defaults(func=do_simulate)
 
-    command_parser = subparsers.add_parser('train', help='Trains an evaluation model on some data')
-    command_parser.add_argument('-evo', '--embeddings-vocab',   type=argparse.FileType('r'), default="data/embeddings.vocab",   help="Path to word embedding vocabulary")
-    command_parser.add_argument('-eve', '--embeddings-vectors', type=argparse.FileType('r'), default="data/embeddings.vectors", help="Path to word vectors")
+    command_parser = subparsers.add_parser('build-table', help='Simulates an evaluation model on some data')
     command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="Path to an input dataset.")
-    command_parser.add_argument('-H', '--helper', type=str, required=True, help='Featurizer/Helper to use')
-    command_parser.add_argument('-Xh', '--helper_args', type=dictstr, nargs="+", default=None, help='Features to use in the helper')
-    command_parser.add_argument('-cvs', '--cross-validation-splits', type=int, default=10, help="Cross-validation splits to use")
-    command_parser.add_argument('-cvi', '--cross-validation-iters', type=int, default=1, help="Cross-validation splits to use")
-    command_parser.add_argument('-cvx', '--cross-validation-start', type=int, default=0, help="Cross-validation splits to start with")
-    command_parser.add_argument('-n', '--n_epochs', type=int, default=10, help='How many iterations to train')
-    command_parser.add_argument('-M', '--model', type=str, default=None, help="Which model to use")
-    command_parser.add_argument('-Xm', '--model-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the model")
-    command_parser.set_defaults(func=do_train)
+    command_parser.add_argument('-im', '--input-means', type=GzipFileType('rt'),  help="Path to an input dataset.")
+    command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="Path to output the evaluation trajectory.")
+    command_parser.add_argument('-Tg', '--transform-gold-labels', action='store_true', default=False, help="Transform: no annotator noise.")
+    command_parser.add_argument('-E', '--estimator', type=str, default=None, help="Which estimator to use")
+    command_parser.add_argument('-Xe', '--estimator-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the estimator")
+    command_parser.add_argument('-nE', '--num-epochs', type=int, default=100, help="Number of epochs")
+
+    command_parser.add_argument('-Dp', '--data-prompt', type=str, help="Which prompt to compute trajectory on")
+    command_parser.add_argument('-Dm', '--data-metric', type=str, help="Which automatic-metric to use")
+    command_parser.add_argument('-Ds', '--data-system', type=str, help="Which system to use")
+    command_parser.set_defaults(func=do_build_table)
 
     ARGS = parser.parse_args()
     if ARGS.func is None:
         parser.print_help()
         sys.exit(1)
     else:
-        os.makedirs(ARGS.model_path, exist_ok=True)
-        root_logger = logging.getLogger()
-        root_logger.addHandler(logging.FileHandler(os.path.join(ARGS.model_path, "log")))
-
         np.random.seed(ARGS.seed)
-        torch.manual_seed(ARGS.seed)
         ARGS.func(ARGS)

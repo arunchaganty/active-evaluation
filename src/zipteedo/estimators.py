@@ -3,91 +3,137 @@ Active evaluation methods.
 """
 import pdb
 
+import scipy as sc
 import numpy as np
-from tqdm import tqdm, trange
-from .util import StatCounter
+from tqdm import trange
 
-def simple(_, **___):
-    def _ret(data, seed=None):
-        rng = np.random.RandomState(seed)
-        rng.shuffle(data)
+def simple(**_):
+    def _ret(_, __, hs):
+        N = len(hs)
+        z = np.arange(1, N+1)
 
-        fs = np.array([[datum['y'], 1.] for datum in data])
-        ret = np.cumsum(fs) / np.arange(1, len(fs)+1)
+        ret = np.cumsum(hs) / z
         return ret
     return _ret
 
-def model_baseline(model, baseline_samples=1.0, **_):
-    def _ret(data, seed=None):
-        rng = np.random.RandomState(seed)
-        rng.shuffle(data)
+def model_variate(_g0=None, _var_g=None, estimate_scale=True, **_):
+    def _ret(_, gs, hs):
+        N = len(hs)
+        z = np.arange(1, N+1)
 
-        fs = np.array([datum['y'] for datum in data])
-        gs = model(data)
-        assert gs.shape == (len(data), 2), "Unexpected model output"
-        gs = gs.T[0]
-        g0 = np.mean(gs[-int(len(data) * baseline_samples):])
-
-        ret = g0 + np.cumsum(fs - gs) / np.arange(1, len(fs)+1)
-        return ret
-
-    return _ret
-
-def model_optimal(model, baseline_samples=1.0, estimate_scale=True, **_):
-    def _ret(data, seed=None):
-        rng = np.random.RandomState(seed)
-        rng.shuffle(data)
-
-        N = len(data)
-
-        fs = np.array([datum['y'] for datum in data])
-        gs = model(data)
-        assert gs.shape == (len(data), 2), "Unexpected model output"
-        gs = gs.T[0]
-        g0 = np.mean(gs[-int(len(data) * baseline_samples):])
+        # TODO: get mean_g, var_g from elsewhere
+        g0 = _g0 if _g0 is not None else np.mean(gs)
+        var_g = _var_g if _var_g is not None else np.var(gs)
 
         # scale by rho*sigma_f/sigma_g
-        z = np.arange(1, N+1)
         if estimate_scale:
-            mean_f = np.cumsum(fs) / z
+            mean_h = np.cumsum(hs) / z
             mean_g = np.cumsum(gs) / z
-            mean_fg = np.cumsum(fs * gs) / z
-            var_g = np.cumsum(gs**2)/z - mean_g**2
-            var_g[var_g < 1e-5] = 1 # exception for this one case.
-            # scale factor = rho sigma_f/sigma_g
-            alpha = (mean_fg - mean_f * mean_g) / var_g
-            fs_t = np.array([np.mean((fs - alpha[t]*gs)[:t+1]) for t in range(N)])
+            mean_hg = np.cumsum(hs * gs) / z
+            #var_g[var_g < 1e-10] = 1 # exception for this one case.
+            # scale factor = cov(h,g) / var_g
+
+            alpha = (mean_hg - mean_h * mean_g) / var_g
+            #pdb.set_trace()
+            hs_t = np.array([np.mean((hs - alpha[t]*gs)[:t+1]) for t in range(N)])
         else:
-            mean_f = np.mean(fs)
+            mean_h = np.mean(hs)
             mean_g = np.mean(gs)
-            mean_fg = np.mean(fs * gs)
+            mean_hg = np.mean(hs * gs)
             var_g = np.std(gs)
-            alpha = (mean_fg - mean_f * mean_g) / var_g
-            fs_t = fs - alpha
+            alpha = (mean_hg - mean_h * mean_g) / var_g
+            hs_t = np.cumsum(hs - alpha*gs) / z
 
-        ret = alpha * g0 + fs_t
+        ret = alpha * g0 + hs_t
         return ret
+    return _ret
 
+def _linear(data):
+    """
+    Returns truth according to linear estimation
+    """
+    for datum in data:
+        datum['yi'] = list(range(len(datum['ys'])))
+    A, y = encode_data_linear(data)
+    c = sc.linalg.solve(A, np.ones(len(y)), sym_pos=True)
+    c /= c.sum()
+    return c.dot(y)
+
+def _simple(data, use_gold=False):
+    """
+    Returns truth according to linear estimation
+    """
+    return np.mean([y for datum in data for y in ([datum['y*']] if use_gold else datum['ys'])])
+
+def _estimate_sigmas(data):
+    annotators = sorted({a for datum in data for a in datum['as']})
+    tasks  = list(range(len(data)))
+
+    ix_a = np.array([annotators.index(a) for datum in data for a in datum['as']])
+    ix_t = np.array([i for i, datum in enumerate(data) for _ in datum['ys']])
+
+    y = np.array([y_ for datum in data for y_ in datum['ys']])
+    fs = np.array([np.mean(y[ix_t == i]) for i in range(len(tasks))])
+    as_ = np.array([np.mean(y[ix_a == i] - fs[ix_t[ix_a == i]]) if i in ix_a else 0 for i in range(len(annotators))])
+    rs = y - fs[ix_t] - as_[ix_a]
+
+    sigma2_f = np.var(fs, ddof=1)
+    sigma2_a = np.var(as_, ddof=1)
+    sigma2_r = np.var(rs, ddof=1)
+    pdb.set_trace()
+
+    return sigma2_f, sigma2_a, sigma2_r
+
+def encode_data_linear(data, use_gold=True):
+    annotators = sorted({datum['as'][i] for datum in data for i in datum['yi']})
+    tasks  = list(range(len(data)))
+
+    ix_a = np.array([annotators.index(datum['as'][i]) for datum in data for i in datum['yi']])
+    ix_t = np.array([i for i, datum in enumerate(data) for _ in datum['yi']])
+    ix = np.array([i for i, _ in enumerate(ix_a)])
+
+    y = np.array([datum['ys'][i] for datum in data for i in datum['yi']])
+    if use_gold:
+        sigma2_f, sigma2_a, sigma2_r = _estimate_sigmas(data)
+    else:
+        fs = np.array([np.mean(y[ix_t == i]) for i in range(len(tasks))])
+        as_ = np.array([np.mean(y[ix_a == i] - fs[ix_t[ix_a == i]]) if i in ix_a else 0 for i in range(len(annotators))])
+        rs = y - fs[ix_t] - as_[ix_a]
+        sigma2_f, sigma2_a, sigma2_r = np.var(fs, ddof=1), np.var(as_, ddof=1), np.var(rs, ddof=1)
+
+    n = len(ix)
+    A = np.zeros((n, n))
+    A[ix, ix] = sigma2_r
+    for i in range(len(annotators)):
+        A[np.ix_(ix_a == i, ix_a == i)] += sigma2_a
+    for i in range(len(tasks)):
+        A[np.ix_(ix_t == i, ix_t == i)] += sigma2_f
+
+    return A, y
+
+def linear(_, use_gold=True, **__):
+    def _ret(data, seed=None):
+        A, y = encode_data_linear(data, use_gold=use_gold)
+
+        rng = np.random.RandomState(seed)
+        #ixs = rng.randint(len(_y), size=(len(_y),))
+        ixs = rng.permutation(len(y))
+        A, y = A[np.ix_(ixs, ixs)], y[ixs]
+        n, _ = A.shape
+
+        ret = []
+        L = sc.linalg.cholesky(A)
+        for i in trange(1, n+1, desc="estimating"):
+            c = sc.linalg.cho_solve((L[:i,:i], True), np.ones(i))
+            c /= c.sum()
+            print(c)
+            pdb.set_trace()
+            ret.append(c.dot(y[:i]))
+        return np.array(ret)
     return _ret
 
 def cumlogsumexp(a):
     return np.logaddexp.accumulate(a)
-
-def sample_wo_replacement(ws):
-    ws = ws.tolist()
-    xs = list(range(len(ws)))
-    ret = []
-
-    # make a copy
-    while len(ws) > 1:
-        i = np.random.choice(len(xs), p=ws)
-        ret.append(xs.pop(i))
-        ws.pop(i)
-        z = sum(ws)
-        ws = [w/z for w in ws]
-    ret += xs
-
-    return np.array(ret)
 
 def model_importance(model, baseline_samples=1.0, use_confidence=True, **_):
     def _ret(data, seed=None):
@@ -119,119 +165,42 @@ def model_importance(model, baseline_samples=1.0, use_confidence=True, **_):
 
     return _ret
 
+def analyze_coefficients(data):
+    annotators = sorted({a for datum in data for a in datum['as']})
+    tasks  = list(range(len(data)))
 
-#def gaussian_process(_, wv_dim=50, **__):
-#    gp = GaussianProcessRegressor(kernel=kernels.DotProduct())
-#
-#    def _ret(data, seed=None):
-#        rng = np.random.RandomState(seed)
-#        rng.shuffle(data)
-#
-#        X = np.array([datum['x_'] for datum in data])
-#        Y = np.array([[datum['y'],] for datum in data])
-#
-#        ret = np.zeros(len(data))
-#        i_ = 0
-#        for i in tqdm([100, 1000, 2000,], desc="estimating"):
-#            gp.fit(X[:i+1,:], Y[:i+1])
-#            mean, std = gp.predict(X, return_std=True)
-#            std2 = 1/(1 + std**2)
-#            ret[i_:i] = (mean * std2/std2.sum()).sum()
-#            i_ = i
-#        return np.array(ret)
-#    return _ret
-# 
-# def tf_gc():
-#     graph = tf.get_default_graph()
-#     for key in graph.get_all_collection_keys():
-#         graph.clear_collection(key)
-# 
-# def gaussian_process(_, wv_dim=50, **__):
-#     kernel = gpflow.kernels.RBF(wv_dim, lengthscales=0.1)
-#     #mf = gpflow.mean_functions.Linear()
-# 
-#     def _ret(data, seed=None):
-#         rng = np.random.RandomState(seed)
-#         rng.shuffle(data)
-# 
-#         X = np.array([datum['x_'] for datum in data])
-#         Y = np.array([[datum['y'],] for datum in data])
-# 
-#         ret = np.zeros(len(data))
-#         i_ = 0
-#         for i in tqdm([100, 1000, 2000,]):
-#             m = gpflow.models.GPR(X[:i+1, :], Y[:i+1], kern=kernel)#, mean_function=mf)
-#             mean, std2 = m.predict_y(X)
-#             std2 = 1/(1 + std2)
-#             std2 /= std2.sum() # normalize
-#             est = (mean * std2).sum()
-#             ret[i_:i] = est
-#             i_ = i
-#         return np.array(ret)
-#     return _ret
-# 
-# def test_gaussian_process_estimator():
-#     import matplotlib.pyplot as plt
-#     import matplotlib.animation as animation
-# 
-#     N = 1000
-#     X = np.random.rand(N,1)
-#     Y = np.sin(12*X) + 0.66*np.cos(25*X) + np.random.randn(N,1)*0.1# + 3
-#     data = np.hstack((X,Y))
-#     data_ = np.array(data)
-#     data_.sort(0)
-# 
-#     k = gpflow.kernels.Matern52(1, lengthscales=0.1)
-#     def update_figure(num, line, lower, upper):
-# #        pdb.set_trace()
-#         m = gpflow.models.SGPR(data[:num+1,0:1], data[:num+1, 1:], kern=k, feat=data[:num+1,0:1])
-#         m.kern_variance = 0.01
-#         m.likelihood_variance = 0.01
-#         
-#         mean, var = m.predict_y(data_[:,0:1])
-# #        pdb.set_trace()
-#         line.set_data(data_[:,0],  mean)
-#         lower.set_data(data_[:,0], mean - 2*np.sqrt(var))
-#         upper.set_data(data_[:,0], mean + 2*np.sqrt(var))
-#         return line, lower, upper,
-# 
-#     # Set up formatting for the movie files
-#     Writer = animation.writers['imagemagick']
-#     writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
-# 
-#     fig = plt.figure()
-#     ax = fig.gca()
-# 
-#     line, = ax.plot([], [], 'b-')
-#     lower, = ax.plot([], [], 'b:')
-#     upper, = ax.plot([], [], 'b:')
-#     points = ax.scatter(X,Y)
-#     ax.set_xlim(X.min(), X.max())
-#     ax.set_ylim(Y.min(), Y.max())
-#     ax.set_xlabel('x')
-#     ax.set_ylabel('y')
-#     line_ani = animation.FuncAnimation(fig, update_figure, trange(100), fargs=(line, lower, upper),
-#                                        interval=200, blit=True)
-#     line_ani.save('gp.gif', writer=writer)
-# 
-# ## TODO: make this into a standard estimator as above.
-# #def gaussian_process_estimator(X, y, X_old=None, y_old=None, kernel=None):
-# #    r"""
-# #    @data is a set of [x,y] pairs.
-# #    @returns a list with the current estimate of \E[y].
-# #    """
-# #    gp = GaussianProcessRegressor(kernel=kernel)
-# #    n = len(y)
-# #
-# #    ret = []
-# #    for i in trange(n):
-# #        if X_old is not None and y_old is not None:
-# #            gp.fit(np.vstack([X_old,X[:i+1]]), np.vstack([y_old,y[:i+1]]))
-# #        else:
-# #            gp.fit(X[:i+1], y[:i+1])
-# #
-# #        y_, std_ = gp.predict(X, return_std=True)
-# #        mu_ = StatCounter(zip(y_, 1./(1+std_)**2)).mean
-# #        mu_ = np.mean(y_)
-# #        ret.append(mu_)
-# #    return ret, gp
+    ix_a = np.array([annotators.index(a) for datum in data for a in datum['as']])
+    ix_t = np.array([i for i, datum in enumerate(data) for _ in datum['ys']])
+    ix = np.array([i for i, _ in enumerate(ix_a)])
+
+    y = np.array([y for datum in data for y in datum['ys']])
+
+    fs = np.array([np.mean(y[ix_t == i]) for i in range(len(tasks))])
+    as_ = np.array([np.mean(y[ix_a == i] - fs[ix_t[ix_a == i]]) if i in ix_a else 0 for i in range(len(annotators))])
+    rs = y - fs[ix_t] - as_[ix_a]
+    sigma_f, sigma_a, sigma_r = np.std(fs), np.std(as_), np.std(rs)
+
+    n = len(ix)
+    A = np.zeros((n, n))
+    A[ix, ix] = sigma_r**2
+    for i in range(len(annotators)):
+        A[np.ix_(ix_a == i, ix_a == i)] += sigma_a**2
+    for i in range(len(tasks)):
+        A[np.ix_(ix_t == i, ix_t == i)] += sigma_f**2
+
+    c = sc.linalg.solve(A, np.ones(n), sym_pos=True)
+
+    # convert responses into a matrix.
+    Y = np.zeros((len(tasks), len(annotators)))
+    Y[ix_t, ix_a] = y
+
+    C = np.zeros((len(tasks), len(annotators)))
+    C[ix_t, ix_a] = c
+
+    R = np.zeros((len(tasks), len(annotators)))
+    R[ix_t, ix_a] = rs
+
+    M = np.ones((len(tasks), len(annotators)))
+    M[ix_t, ix_a] = 0
+
+    return Y, C, R, M, fs, as_

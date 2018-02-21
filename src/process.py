@@ -5,8 +5,26 @@ Routines to pre-process datasets into a canonical format.
 """
 
 import sys
+from collections import defaultdict
+from tqdm import tqdm
+
 from zipteedo.util import GzipFileType
 from zipteedo.util import load_jsonl, save_jsonl, read_csv
+from zipteedo import metrics
+
+def pivot_data(data, input_key, metric_keys):
+    """
+    Returns another verison of this data with ids, systems as indices.
+    """
+    ret = defaultdict(dict)
+    for datum in data:
+        for system in datum["input"]["contents"]["system"].split(";"):
+            id_ = datum["input"]["contents"]["id"]
+            ret[id_][system] = {
+                "input": datum["input"]["contents"][input_key],
+                "metrics": {key: datum["output"][key] for key in metric_keys},
+                }
+    return ret
 
 def do_snli(args):
     vmap = {
@@ -30,6 +48,175 @@ def do_acceptability(args):
                 } for datum in read_csv(args.input))
               )
 
+def do_msmarco_mean(args):
+    # 1. Load data.
+    data = load_jsonl(args.input)
+    # Pivot the data so that we know can access other entries.
+    refs = {datum["id"]: datum["answer"] for datum in data if datum["system"] == "reference"}
+
+    ret = []
+    for datum in tqdm(data):
+        if datum["system"] == "reference": continue
+
+        if datum["id"] not in refs: continue
+
+        answer, ref = datum["answer"], refs[datum["id"]]
+        answer, ref = answer.replace("\n", " "), ref.replace("\n", " ")
+        answer_, ref_ = metrics.word_tokenize(answer), metrics.word_tokenize(ref)
+
+        common = {
+            "bleu": metrics.bleu(answer_, [ref_]) if answer_ else 0,
+            "rouge": metrics.rouge(answer_, ref_) if answer_ else 0,
+            "meteor": metrics.meteor(answer, [ref]) if answer else 0,
+            "ter": metrics.ter(answer_, ref_) if answer_ else 0,
+            "sim": metrics.sim(answer, ref) if answer else 0,
+            }
+
+        for system in datum["system"].split(";"):
+            inst = {
+                "id":  datum["id"],
+                "system": system,
+                "prompts": {
+                    key: {
+                        **common
+                        } for key in ["AnyCorrect", "AvgCorrect",]
+                    },
+                }
+            ret.append(inst)
+    save_jsonl(args.output, ret)
+
+def do_msmarco(args):
+    # 1. Load data.
+    data = load_jsonl(args.input)
+    # Pivot the data so that we know can access other entries.
+    index = pivot_data(data, "answer", ["AnyCorrect", "AvgCorrect"])
+
+    ret = []
+    for datum in tqdm(data):
+        inp, out, rs = datum["input"]["contents"], datum["output"], datum["output"]["_responses"]
+
+
+        entries = index[inp["id"]]
+        answer, ref = inp["answer"], entries["reference"]["input"]
+        answer, ref = answer.replace("\n", " "), ref.replace("\n", " ")
+        answer_, ref_ = metrics.word_tokenize(answer), metrics.word_tokenize(ref)
+
+        common = {
+            "bleu": metrics.bleu(answer_, [ref_]) if answer_ else 0,
+            "rouge": metrics.rouge(answer_, ref_) if answer_ else 0,
+            "meteor": metrics.meteor(answer, [ref]) if answer else 0,
+            "ter": metrics.ter(answer_, ref_) if answer_ else 0,
+            "sim": metrics.sim(answer, ref) if answer else 0,
+            }
+
+        for system in datum["input"]["contents"]["system"].split(";"):
+            inst = {
+                "id":  inp["id"],
+                "system": system,
+                #"x": [[inp["query"], inp["passages"]], inp["answer"]],
+                "annotators": rs["worker_ids"],
+                "prompts": {
+                    key: {
+                        "gold": out[key],
+                        "human": rs[key],
+                        **common
+                        } for key in ["AnyCorrect", "AvgCorrect",]
+                    },
+                }
+            ret.append(inst)
+    save_jsonl(args.output, ret)
+
+def do_lqual(args):
+    # 1. Load data.
+    data = load_jsonl(args.input)
+    # Pivot the data so that we know can access other entries.
+    refs = {datum["input"]["contents"]["id"]: datum["input"]["contents"]["text"] for datum in data if datum["input"]["contents"]["system"] == "reference"}
+
+    ret = []
+    for datum in tqdm(data):
+        inp, out, rs = datum["input"]["contents"], datum["output"], datum["output"]["_responses"]
+        if not rs: continue
+        if inp["id"] not in refs: continue
+
+        answer, ref = inp["text"], refs[inp["id"]]
+        # TODO: compute metrics for cross-examples.
+        answer_, ref_ = metrics.word_tokenize(answer), metrics.word_tokenize(ref)
+
+        common = {
+            "bleu": metrics.bleu(answer_, [ref_]) if answer_ else 0,
+            "rouge": metrics.rouge(answer_, ref_) if answer_ else 0,
+            "meteor": metrics.meteor(answer, [ref]) if answer else 0,
+            "ter": metrics.ter(answer_, ref_) if answer_ else 0,
+            "sim": metrics.sim(answer, ref) if answer else 0,
+            }
+
+        inst = {
+            "id":  inp["id"],
+            "system": datum["input"]["contents"]["system"],
+            #"x": inp["text"],
+            "annotators": rs["worker_ids"],
+            "prompts": {
+                key: {
+                    "gold": out[key],
+                    "human": rs[key],
+                    **common
+                    } for key in ["hter", "overall", "grammar", "redundancy"]
+                },
+            }
+        ret.append(inst)
+    save_jsonl(args.output, ret)
+
+def do_lqual_mean(args):
+    # 1. Load data.
+    data = load_jsonl(args.input)
+    # Pivot the data so that we know can access other entries.
+    refs = {datum["id"]: datum["text"] for datum in data if datum["system"] == "reference"}
+
+    ret = []
+    for datum in tqdm(data):
+        if datum["system"] == "reference": continue
+
+        if datum["id"] not in refs: continue
+
+        answer, ref = datum["text"], refs[datum["id"]]
+        answer, ref = answer.replace("\n", " "), ref.replace("\n", " ")
+        answer_, ref_ = metrics.word_tokenize(answer), metrics.word_tokenize(ref)
+
+        common = {
+            "bleu": metrics.bleu(answer_, [ref_]) if answer_ else 0,
+            "rouge": metrics.rouge(answer_, ref_) if answer_ else 0,
+            "meteor": metrics.meteor(answer, [ref]) if answer else 0,
+            "ter": metrics.ter(answer_, ref_) if answer_ else 0,
+            "sim": metrics.sim(answer, ref) if answer else 0,
+            }
+
+        for system in datum["system"].split(";"):
+            inst = {
+                "id":  datum["id"],
+                "system": system,
+                "prompts": {
+                    key: {
+                        **common
+                        } for key in ["hter", "overall", "grammar", "redundancy",]
+                    },
+                }
+            ret.append(inst)
+    save_jsonl(args.output, ret)
+
+
+def do_dialog(args):
+    ret = []
+    for datum in load_jsonl(args.input):
+        for i, elem in enumerate(datum["input"]["contents"]):
+            obj = {"x": elem["context"],
+                   "y*": (datum["output"]["overall"][i] + 2) / 5,
+                   "ys": [(rs[i] + 2)/5 for rs in datum["output"]["_responses"]["overall"]],
+                   "as": datum["output"]["_responses"]["worker_ids"],
+                   "system": elem["system"],
+                  }
+            ret.append(obj)
+    save_jsonl(args.output, ret)
+
 
 if __name__ == "__main__":
     import argparse
@@ -47,6 +234,31 @@ if __name__ == "__main__":
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="standardized data file")
     command_parser.set_defaults(func=do_acceptability)
 
+    command_parser = subparsers.add_parser('msmarco', help='Preprocess the MSMarco dataset')
+    command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="MSMarco json file")
+    command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="standardized data file")
+    command_parser.set_defaults(func=do_msmarco)
+
+    command_parser = subparsers.add_parser('msmarco-mean', help='Preprocess the MSMarco dataset')
+    command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="MSMarco json file")
+    command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="standardized data file")
+    command_parser.set_defaults(func=do_msmarco_mean)
+
+    command_parser = subparsers.add_parser('lqual', help='Preprocess the lqual dataset')
+    command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="input json file")
+    command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="standardized data file")
+    command_parser.set_defaults(func=do_lqual)
+
+    command_parser = subparsers.add_parser('lqual-mean', help='Preprocess the lqual dataset')
+    command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="input json file")
+    command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="standardized data file")
+    command_parser.set_defaults(func=do_lqual_mean)
+
+
+    command_parser = subparsers.add_parser('dialog', help='Preprocess the dialog dataset')
+    command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="input json file")
+    command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="standardized data file")
+    command_parser.set_defaults(func=do_dialog)
 
     ARGS = parser.parse_args()
     if ARGS.func is None:

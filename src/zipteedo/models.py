@@ -86,7 +86,7 @@ def OracleModelBinomial(data, rho=1.0, use_gold=True):
 
 
 def ConstantModel(data, cnst=0., use_gold=True, lmb=0.):
-    sigma_a = np.mean([np.std(datum['y']) for datum in data])
+    sigma_a = np.mean([np.std(datum['ys']) for datum in data])
 
     def ret(data):
         if use_gold:

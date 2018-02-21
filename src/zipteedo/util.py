@@ -2,6 +2,7 @@
 Utility functions for zipteedo.
 """
 import csv
+import numpy
 import logging
 import json
 import gzip
@@ -32,7 +33,7 @@ def save_jsonl(fstream, objs):
         with open(fstream, "w") as f:
             save_jsonl(f, objs)
     for obj in objs:
-        fstream.write(json.dumps(obj))
+        fstream.write(json.dumps(obj, cls=JSONEncoder))
         fstream.write("\n")
 
 def read_csv(istream):
@@ -203,3 +204,17 @@ class TqdmHandler(logging.StreamHandler):
 
     def flush(self):
         super().flush()
+
+def first(col):
+    return next(iter(col))
+
+class JSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, numpy.integer):
+            return int(obj)
+        elif isinstance(obj, numpy.floating):
+            return float(obj)
+        elif isinstance(obj, numpy.ndarray):
+            return obj.tolist()
+        else:
+            return super(JSONEncoder, self).default(obj)
