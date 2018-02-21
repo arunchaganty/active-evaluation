@@ -102,7 +102,6 @@ def do_simulate(args):
 
     # get trajectory
     trajectory = bootstrap_trajectory(fs, gs, hs, anns, estimator, args.num_epochs)
-    pdb.set_trace()
     summary = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)])
 
     # Save output
