@@ -49,10 +49,10 @@ def bootstrap_trajectory(fs, gs, hs, anns, estimator, epochs=1000):
     # Create a bootstrap sample of fs, gs, and hs
     for i in trange(epochs, desc="bootstrapping"):
         # Get a set of random indices with replacement
-        ixs, jxs = np.random.randint(0, N, (N,)), np.random.randint(0, N, (N,))
+        ixs, jxs = np.random.randint(0, N, (N,)), [np.random.randint(0, len(h)) for h in hs]
         fs_, gs_ = fs[ixs], gs[ixs]
-        hs_ = np.array([hs[i][j % len(hs[i])] for i,j in zip(ixs,jxs)])
-        anns_ = np.array([anns[i][j % len(hs[i])] for i,j in zip(ixs,jxs)])
+        hs_ = np.array([hs[i][jxs[i]] for i in ixs])
+        anns_ = np.array([anns[i][jxs[i]] for i in ixs])
 
         ret[i, :] = estimator(fs_, gs_, hs_, anns_)
     return ret
@@ -89,6 +89,7 @@ def do_simulate(args):
 
     # project data.
     fs, gs, hs, anns = apply_transforms(args, data)
+    fs = np.array([np.mean(h) for h in hs]) # FIXES BUG
     if args.data_metric not in metric_ss:
         logger.warning("USING DROP IN ESTIMATES FOR mu_g and var_g")
         args.estimator_args["_g0"], args.estimator_args["_var_g"] = np.mean(gs), np.var(gs)
@@ -96,11 +97,12 @@ def do_simulate(args):
         args.estimator_args["_g0"], args.estimator_args["_var_g"] = metric_ss[args.data_metric][args.data_prompt][args.data_system]
 
     # model.
-    truth = np.mean(fs)
+    truth = np.mean([np.mean(h) for h in hs])
     estimator = get_estimator(args)
 
     # get trajectory
     trajectory = bootstrap_trajectory(fs, gs, hs, anns, estimator, args.num_epochs)
+    pdb.set_trace()
     summary = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)])
 
     # Save output
@@ -152,6 +154,7 @@ def do_build_table(args):
 
         # project data.
         fs, gs, hs = apply_transforms(args, data)
+        fs = np.array([np.mean(h) for h in hs]) # FIXES BUG
 
         if metric in metric_ss:
             args.estimator_args["_g0"], args.estimator_args["_var_g"] = metric_ss[metric][prompt][system]
