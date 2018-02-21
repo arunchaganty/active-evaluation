@@ -96,26 +96,7 @@ def do_variance_trajectory(args):
 
 def do_estimation_trajectory(args):
     def make_label(obj):
-        ret = ""
-        if obj["model"] == "ConstantModel":
-            ret += "Constant (${:.2f}$)".format(obj["model_args"].get("cnst", 0.))
-        elif obj["model"] == "OracleModel":
-            ret += r"Oracle ($\rho={:.2f}$)".format(obj["model_args"].get("rho", 1.))
-        else:
-            ret += obj["model"] or "No model"
-
-        # TODO: add information about estimator
-        if obj['estimator'] == "model_optimal":
-            ret += " w/scaling"
-        elif obj['estimator'] == "model_importance":
-            ret += " w/importance"
-        elif obj['estimator'] == "linear":
-            ret += " w/linear"
-        if obj["transforms"]["gold_labels"]:
-            ret += " (gold)"
-
-        ret += " $n_a={}$".format(obj["n_annotators"])
-
+        ret = "{}-{}".format(obj["metric"], obj["estimator"])
         return ret
 
     def apply_data_transform(args, obj, data):
@@ -126,7 +107,8 @@ def do_estimation_trajectory(args):
         return data
 
     colors = get_colors(len(args.systems))
-    for i, trajectory in enumerate([json.load(system) for system in args.systems]):
+    trajectories = [json.load(system) for system in args.systems]
+    for i, trajectory in enumerate(trajectories):
         summary = np.array(trajectory["summary"])
         summary = apply_data_transform(args, trajectory, summary)
 
@@ -136,10 +118,11 @@ def do_estimation_trajectory(args):
         plt.plot(xs, summary.T[1], color=colors[i], linestyle=':', linewidth=0.5)
         plt.plot(xs, summary.T[2], color=colors[i], linestyle=':', linewidth=0.5)
 
-    plt.rc("text", usetex=True)
+    #plt.rc("text", usetex=True)
     plt.rc("figure", figsize=(10,10))
     plt.xlabel("Samples")
     plt.ylabel("Estimation error")
+    plt.title("{} {}".format(trajectories[0]['prompt'], trajectories[0]['system']))
     plt.xlim(1, min(args.xlim, plt.xlim()[1]))
     if args.center:
         plt.ylim(-0.1, 0.1)
