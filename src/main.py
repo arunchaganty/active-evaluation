@@ -57,6 +57,19 @@ def bootstrap_trajectory(fs, gs, hs, anns, estimator, epochs=1000):
         ret[i, :] = estimator(fs_, gs_, hs_, anns_)
     return ret
 
+def transform(data, prompt, metric):
+    ret = []
+    systems = sorted({datum["system"] for datum in data})
+    systems.remove("reference")
+    for system in systems:
+        xy = np.array([[datum["prompts"][prompt]["gold"], datum["prompts"][prompt][metric]] for datum in data if datum["system"] == system])
+        ret.append(np.mean(xy, 0))
+    return np.array(ret)
+
+def transform_(data, prompt, metric):
+    xy = np.array([[datum["prompts"][prompt]["gold"], datum["prompts"][prompt][metric]] for datum in data])
+    return xy
+
 def apply_transforms(args, data):
     # Restrict data to this given prompt, metric and system
     prompt = args.data_prompt
@@ -65,12 +78,23 @@ def apply_transforms(args, data):
 
     fs, gs, hs, anns = [], [], [], []
 
+    if args.transform_metric:
+        # Find out what the scale, shift is for this metric. 
+        #xy = transform(data, prompt, metric)
+        xy = transform_(data, prompt, metric)
+        coeffs = np.polyfit(xy.T[1], xy.T[0], 1)
+        print(coeffs)
+
     for i, datum in enumerate(data):
         if datum["system"] != system: continue
         vs = datum["prompts"][prompt]
+        #f, g, h, ann = vs["gold"], vs[metric], vs["human"], datum["annotators"]
         f, g, h, ann = vs["gold"], vs[metric], vs["human"], datum["annotators"]
         if args.transform_gold_labels:
             h = [f]
+            ann = [i]
+        elif args.transform_metric:
+            h = [coeffs[0]*g + coeffs[1]]
             ann = [i]
 
         fs.append(f)
@@ -125,6 +149,7 @@ def report_trajectory(args, truth, summary):
         "metric": args.data_metric,
         "system": args.data_system,
         "use_gold": args.transform_gold_labels,
+        "use_metric": args.transform_metric,
         "estimator": args.estimator,
         "estimator_args": args.estimator_args,
         "truth": truth,
@@ -134,8 +159,8 @@ def report_trajectory(args, truth, summary):
 def do_build_table(args):
     args.estimator_args = dict(args.estimator_args or [])
     data = load_jsonl(args.input)
-    data_means = load_jsonl(args.input_means)
-    metric_ss = get_metric_ss(data_means)
+    data_means = load_jsonl(args.input_means) if args.input_means else None
+    metric_ss = get_metric_ss(data_means) if data_means else {}
 
     prompts = list(first(data)["prompts"])
     metrics = list(first(first(data)["prompts"].values()))
@@ -145,6 +170,7 @@ def do_build_table(args):
 
     trajectories = []
     settings = [(metric, prompt, system) for metric in metrics for prompt in prompts for system in systems]
+    #settings = [(metric, prompt, system) for metric in ["gold"] for prompt in prompts for system in systems]
     for metric, prompt, system in tqdm(settings, desc="settings"):
         args.data_prompt = prompt
         args.data_metric = metric
@@ -152,7 +178,7 @@ def do_build_table(args):
 
 
         # project data.
-        fs, gs, hs = apply_transforms(args, data)
+        fs, gs, hs, anns = apply_transforms(args, data)
         fs = np.array([np.mean(h) for h in hs]) # FIXES BUG
 
         if metric in metric_ss:
@@ -164,15 +190,15 @@ def do_build_table(args):
         truth = np.mean(fs)
 
         args.estimator = "simple"
-        trajectory = bootstrap_trajectory(fs, gs, hs, get_estimator(args), args.num_epochs)
+        trajectory = bootstrap_trajectory(fs, gs, hs, anns, get_estimator(args), args.num_epochs)
         simple = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)]).T
         trajectories.append(report_trajectory(args, truth, simple))
 
-        args.estimator = "model_variate"
-        trajectory = bootstrap_trajectory(fs, gs, hs, get_estimator(args), args.num_epochs)
-        mv = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)]).T
+        #args.estimator = "model_variate"
+        #trajectory = bootstrap_trajectory(fs, gs, hs, get_estimator(args), args.num_epochs)
+        #mv = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)]).T
 
-        trajectories.append(report_trajectory(args, truth, mv))
+        #trajectories.append(report_trajectory(args, truth, mv))
 
     save_jsonl(args.output, trajectories)
 
@@ -191,6 +217,7 @@ if __name__ == "__main__":
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="Path to output the evaluation trajectory.")
     command_parser.add_argument('-oT', '--output-trajectory', action='store_true', default=False, help="Save the trajectories too.")
     command_parser.add_argument('-Tg', '--transform-gold-labels', action='store_true', default=False, help="Transform: no annotator noise.")
+    command_parser.add_argument('-Tm', '--transform-metric', action='store_true', default=False, help="Transform: no annotator noise.")
     command_parser.add_argument('-E', '--estimator', type=str, default=None, help="Which estimator to use")
     command_parser.add_argument('-Xe', '--estimator-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the estimator")
     command_parser.add_argument('-nE', '--num-epochs', type=int, default=100, help="Number of epochs")
@@ -205,6 +232,7 @@ if __name__ == "__main__":
     command_parser.add_argument('-im', '--input-means', type=GzipFileType('rt'),  help="Path to an input dataset.")
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="Path to output the evaluation trajectory.")
     command_parser.add_argument('-Tg', '--transform-gold-labels', action='store_true', default=False, help="Transform: no annotator noise.")
+    command_parser.add_argument('-Tm', '--transform-metric', action='store_true', default=False, help="Transform: no annotator noise.")
     command_parser.add_argument('-E', '--estimator', type=str, default=None, help="Which estimator to use")
     command_parser.add_argument('-Xe', '--estimator-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the estimator")
     command_parser.add_argument('-nE', '--num-epochs', type=int, default=100, help="Number of epochs")
