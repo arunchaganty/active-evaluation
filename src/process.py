@@ -48,6 +48,20 @@ def do_acceptability(args):
                 } for datum in read_csv(args.input))
               )
 
+def compute_common(answer, ref):
+    answer, ref = answer.lower().replace("\n", " "), ref.lower().replace("\n", " ")
+    answer_, ref_ = metrics.word_tokenize(answer), metrics.word_tokenize(ref)
+
+    common = {
+        "bleu-2": metrics.bleu(answer_, [ref_], n=2) if answer_ else 0,
+        "bleu-4": metrics.bleu(answer_, [ref_], n=4) if answer_ else 0,
+        "meteor": metrics.meteor(answer, [ref]) if answer else 0,
+        "ter": metrics.ter(answer_, ref_) if answer_ else 0,
+        "sim": metrics.sim(answer, ref) if answer else 0,
+        }
+    common.update(metrics.rouge(answer_, ref_))
+    return common
+
 def do_msmarco_mean(args):
     # 1. Load data.
     data = load_jsonl(args.input)
@@ -61,16 +75,7 @@ def do_msmarco_mean(args):
         if datum["id"] not in refs: continue
 
         answer, ref = datum["answer"], refs[datum["id"]]
-        answer, ref = answer.replace("\n", " "), ref.replace("\n", " ")
-        answer_, ref_ = metrics.word_tokenize(answer), metrics.word_tokenize(ref)
-
-        common = {
-            "bleu": metrics.bleu(answer_, [ref_]) if answer_ else 0,
-            "rouge": metrics.rouge(answer_, ref_) if answer_ else 0,
-            "meteor": metrics.meteor(answer, [ref]) if answer else 0,
-            "ter": metrics.ter(answer_, ref_) if answer_ else 0,
-            "sim": metrics.sim(answer, ref) if answer else 0,
-            }
+        common = compute_common(answer, ref)
 
         for system in datum["system"].split(";"):
             inst = {
@@ -98,16 +103,7 @@ def do_msmarco(args):
 
         entries = index[inp["id"]]
         answer, ref = inp["answer"], entries["reference"]["input"]
-        answer, ref = answer.replace("\n", " "), ref.replace("\n", " ")
-        answer_, ref_ = metrics.word_tokenize(answer), metrics.word_tokenize(ref)
-
-        common = {
-            "bleu": metrics.bleu(answer_, [ref_]) if answer_ else 0,
-            "rouge": metrics.rouge(answer_, ref_) if answer_ else 0,
-            "meteor": metrics.meteor(answer, [ref]) if answer else 0,
-            "ter": metrics.ter(answer_, ref_) if answer_ else 0,
-            "sim": metrics.sim(answer, ref) if answer else 0,
-            }
+        common = compute_common(answer, ref)
 
         for system in datum["input"]["contents"]["system"].split(";"):
             inst = {
@@ -140,15 +136,7 @@ def do_lqual(args):
 
         answer, ref = inp["text"], refs[inp["id"]]
         # TODO: compute metrics for cross-examples.
-        answer_, ref_ = metrics.word_tokenize(answer), metrics.word_tokenize(ref)
-
-        common = {
-            "bleu": metrics.bleu(answer_, [ref_]) if answer_ else 0,
-            "rouge": metrics.rouge(answer_, ref_) if answer_ else 0,
-            "meteor": metrics.meteor(answer, [ref]) if answer else 0,
-            "ter": metrics.ter(answer_, ref_) if answer_ else 0,
-            "sim": metrics.sim(answer, ref) if answer else 0,
-            }
+        common = compute_common(answer, ref)
 
         inst = {
             "id":  inp["id"],
@@ -179,16 +167,7 @@ def do_lqual_mean(args):
         if datum["id"] not in refs: continue
 
         answer, ref = datum["text"], refs[datum["id"]]
-        answer, ref = answer.replace("\n", " "), ref.replace("\n", " ")
-        answer_, ref_ = metrics.word_tokenize(answer), metrics.word_tokenize(ref)
-
-        common = {
-            "bleu": metrics.bleu(answer_, [ref_]) if answer_ else 0,
-            "rouge": metrics.rouge(answer_, ref_) if answer_ else 0,
-            "meteor": metrics.meteor(answer, [ref]) if answer else 0,
-            "ter": metrics.ter(answer_, ref_) if answer_ else 0,
-            "sim": metrics.sim(answer, ref) if answer else 0,
-            }
+        common = compute_common(answer, ref)
 
         for system in datum["system"].split(";"):
             inst = {
