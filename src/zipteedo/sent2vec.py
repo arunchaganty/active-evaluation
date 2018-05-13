@@ -6,9 +6,8 @@ import os
 import pexpect
 import numpy as np
 
-# Assumes meteor-1.5.jar is in the same directory as meteor.py.  Change as needed.
-SENT2VEC = '/home/chaganty/Research/resources/sent2vec/fasttext'
-MODEL = '/home/chaganty/Research/resources/sent2vec/wiki_bigrams.bin'
+SENT2VEC = os.environ.get('SENT2VEC', 'sent2vec/fasttext')
+SENT2VEC_MODEL = os.environ.get('SENT2VEC_MODEL', 'sent2vec/wiki_bigrams.bin')
 
 def _norm(x):
     z = np.linalg.norm(x)
@@ -16,7 +15,7 @@ def _norm(x):
 
 class Sent2Vec:
     def __init__(self):
-        self.cmd = [SENT2VEC, 'print-sentence-vectors', MODEL]
+        self.cmd = [SENT2VEC, 'print-sentence-vectors', SENT2VEC_MODEL]
         self.child = pexpect.spawn(
             self.cmd[0], self.cmd[1:],
             cwd=os.path.dirname(os.path.abspath(__file__)),

@@ -6,7 +6,7 @@ import os
 import pexpect
 
 # Assumes meteor-1.5.jar is in the same directory as meteor.py.  Change as needed.
-METEOR_JAR = '/home/chaganty/Research/resources/meteor-1.5/meteor-1.5.jar'
+METEOR_JAR = os.environ.get('METEOR_JAR', 'meteor-1.5/meteor-1.5.jar')
 
 class Meteor:
     def __init__(self):
