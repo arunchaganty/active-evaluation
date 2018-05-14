@@ -1,3 +1,7 @@
 tqdm
-scikit
+scipy
 numpy
+nltk
+pexpect
+git+https://github.com/arunchaganty/pyter.git
+git+https://github.com/tagucci/pythonrouge.git
