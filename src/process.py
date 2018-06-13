@@ -114,7 +114,7 @@ def do_msmarco(args):
                 "prompts": {
                     key: {
                         "gold": out[key],
-                        "human": rs[key],
+                        "human": [r or 0 for r in rs[key]],
                         **common
                         } for key in ["AnyCorrect", "AvgCorrect",]
                     },
