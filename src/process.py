@@ -138,19 +138,20 @@ def do_lqual(args):
         # TODO: compute metrics for cross-examples.
         common = compute_common(answer, ref)
 
-        inst = {
-            "id":  inp["id"],
-            "system": datum["input"]["contents"]["system"],
-            #"x": inp["text"],
-            "annotators": rs["worker_ids"],
-            "prompts": {
-                key: {
-                    "gold": out[key],
-                    "human": rs[key],
-                    **common
-                    } for key in ["hter", "overall", "grammar", "redundancy"]
-                },
-            }
+        for system in datum["input"]["contents"]["system"].split(";"):
+            inst = {
+                "id":  inp["id"],
+                "system": system,
+                #"x": inp["text"],
+                "annotators": rs["worker_ids"],
+                "prompts": {
+                    key: {
+                        "gold": out[key],
+                        "human": rs[key],
+                        **common
+                        } for key in ["hter", "overall", "grammar", "redundancy"]
+                    },
+                }
         ret.append(inst)
     save_jsonl(args.output, ret)
 

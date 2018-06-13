@@ -233,13 +233,9 @@ if __name__ == "__main__":
     command_parser.add_argument('-o', '--output', type=GzipFileType('wt'), default=sys.stdout, help="Path to output the evaluation trajectory.")
     command_parser.add_argument('-Tg', '--transform-gold-labels', action='store_true', default=False, help="Transform: no annotator noise.")
     command_parser.add_argument('-Tm', '--transform-metric', action='store_true', default=False, help="Transform: no annotator noise.")
-    command_parser.add_argument('-E', '--estimator', type=str, default=None, help="Which estimator to use")
     command_parser.add_argument('-Xe', '--estimator-args', type=dictstr, nargs="+", default=None, help="Extra arguments for the estimator")
     command_parser.add_argument('-nE', '--num-epochs', type=int, default=100, help="Number of epochs")
 
-    command_parser.add_argument('-Dp', '--data-prompt', type=str, help="Which prompt to compute trajectory on")
-    command_parser.add_argument('-Dm', '--data-metric', type=str, help="Which automatic-metric to use")
-    command_parser.add_argument('-Ds', '--data-system', type=str, help="Which system to use")
     command_parser.set_defaults(func=do_build_table)
 
     ARGS = parser.parse_args()
