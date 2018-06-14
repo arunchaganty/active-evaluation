@@ -113,7 +113,7 @@ def do_msmarco(args):
                 "annotators": rs["worker_ids"],
                 "prompts": {
                     key: {
-                        "gold": out[key],
+                        "gold": out[key] or 0,
                         "human": [r or 0 for r in rs[key]],
                         **common
                         } for key in ["AnyCorrect", "AvgCorrect",]
