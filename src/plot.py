@@ -134,93 +134,6 @@ def do_model_correlation(args):
     plt.tight_layout()
     plt.savefig(args.output, dpi=400)
 
-def do_variance_trajectory(args):
-    def make_label(obj):
-        ret = ""
-        if obj["model"] == "ConstantModel":
-            return "Baseline: random sampling"
-            ret += "Constant (${:.2f}$)".format(obj["model_args"].get("cnst", 0.))
-        elif obj["model"] == "OracleModel":
-            return "Using a perfect model"
-            ret += r"Oracle ($\rho={:.2f}$)".format(obj["model_args"].get("rho", 1.))
-        else:
-            ret += obj["model"] or "No model"
-
-        # TODO: add information about estimator
-        if obj['estimator'] == "model_optimal":
-            ret += " w/scaling"
-        elif obj['estimator'] == "model_importance":
-            ret += " w/importance"
-        elif obj['estimator'] == "linear":
-            ret += " w/linear"
-        if obj["transforms"]["gold_labels"]:
-            ret += " (gold)"
-
-        ret += " $n_a={}$".format(obj["n_annotators"])
-
-        return ret
-
-    colors = get_colors(len(args.systems))
-    for i, trajectory in enumerate([json.load(system) for system in args.systems]):
-        summary = np.array(trajectory["summary"])
-        summary = summary.T[2] - summary.T[1]
-
-        xs = np.arange(1, len(summary)+1)
-        plt.plot(xs, summary, color=colors[i], label=make_label(trajectory), linewidth=0.5)
-
-    plt.rc("text", usetex=True)
-    plt.rc("figure", figsize=(10,10))
-    plt.xlabel("Samples")
-    plt.ylabel("Confidence interval")
-    plt.xlim(1, min(args.xlim, plt.xlim()[1]))
-    #if args.center:
-    plt.ylim(0.04, 0.2)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(args.output, dpi=400)
-
-
-def do_estimation_trajectory(args):
-    def make_label(obj):
-        ret = "{}-{}".format(obj["metric"], obj["estimator"])
-        return ret
-
-    def apply_data_transform(args, obj, data):
-        if args.transform_mean:
-            data = data - obj["truth"]
-        if args.transform_final:
-            data = data - data[-1,0]
-        return data
-
-    colors = get_colors(len(args.systems))
-    trajectories = [json.load(system) for system in args.systems]
-    for i, trajectory in enumerate(trajectories):
-        summary = np.array(trajectory["summary"])
-        summary = apply_data_transform(args, trajectory, summary)
-
-        xs = np.arange(1, len(summary)+1)
-        plt.plot(xs, summary.T[0], color=colors[i], label=make_label(trajectory), linewidth=0.5)
-        #plt.fill_between(xs, summary.T[1], summary.T[2], color=colors[i], alpha=0.3)
-        plt.plot(xs, summary.T[1], color=colors[i], linestyle=':', linewidth=0.5)
-        plt.plot(xs, summary.T[2], color=colors[i], linestyle=':', linewidth=0.5)
-
-    #plt.rc("text", usetex=True)
-    plt.rc("figure", figsize=(10,10))
-    plt.xlabel("Samples")
-    plt.ylabel("Estimation error")
-    plt.title("{} {}".format(trajectories[0]['prompt'], trajectories[0]['system']))
-    plt.xlim(1, min(args.xlim, plt.xlim()[1]))
-    if args.center:
-        plt.ylim(-0.1, 0.1)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(args.output, dpi=400)
-
-def do_coefficients(args):
-    data = load_jsonl(args.input)
-
-    A, y = zpe.encode_data_linear(data)
-
 def do_bias_plot(args):
     data = load_jsonl(args.input)
     xy = np.array([[y, y_] for _, y, y_ in data[:4]])
@@ -247,6 +160,9 @@ LABELS = {
     "bleu": "BLEU-2",
     "gold": "Upper bound",
 
+    "hter": "Edit",
+    "lqual": "CNN/DailyMail",
+    "msmarco": "MSMARCO",
 
     "fastqa": "fastqa",
     "fastqa_ext": "fastqa\_ext",
@@ -255,9 +171,14 @@ LABELS = {
     "*": "Combined"
     }
 SYSTEMS = {
-        "lqual": ["seq2seq", "pointer", "ml", "ml+rl"],
-        "msmarco": ["fastqa", "fastqa_ext", "snet.single", "snet.ensemble"],
-        }
+    "lqual": ["seq2seq", "pointer", "ml", "ml+rl"],
+    "msmarco": ["fastqa", "fastqa_ext", "snet.single", "snet.ensemble"],
+    }
+
+PROMPTS = {
+    "lqual": ["hter", "overall", "redundancy", "fluency"],
+    "msmarco": ["AnyCorrect", "AvgCorrect"],
+    }
 
 def do_system_correlation(args):
     data = [json.loads(line) for line in open(args.input)]
@@ -344,6 +265,55 @@ def do_correlation_table(args):
     plt.tight_layout()
     plt.savefig(args.output)
 
+def do_trajectory(args):
+    data = [json.loads(line) for line in open(args.input, "rt")]
+    data = {(obj["system"], obj["metric"], obj["prompt"], obj["estimator"]): obj for obj in data}
+
+    if args.input_gold:
+        data_gold = [json.loads(line) for line in open(args.input_gold, "rt")]
+        data_gold = {(obj["system"], obj["metric"], obj["prompt"], obj["estimator"]): obj for obj in data_gold}
+    else:
+        data_gold = None
+
+    colors = cm.tab10.colors
+
+    system = args.data_system
+    metric = args.data_metric
+    prompt = args.data_prompt
+
+    baseline = np.array(data[system, metric, prompt, "simple"]["summary"])
+    model    = np.array(data[system, metric, prompt, "model_variate"]["summary"])
+    if data_gold:
+        model_gold = np.array(data_gold[system, metric, prompt, "model_variate"]["summary"])
+    gold     = np.array(data[system, "gold", prompt, "model_variate"]["summary"])
+
+    plt.rc("font", size=16)
+    plt.rc("text", usetex=True)
+    #plt.rc("figure", figsize=(10,10))
+
+    plt.xlabel("Number of samples")
+    plt.ylabel(r"80\% confidence interval")
+    plt.plot(baseline.T[2] - baseline.T[1], color=colors[0], label="Humans")
+    plt.plot(model.T[2] - model.T[1], color=colors[1], label="Humans + {}".format(LABELS.get(metric,metric)))
+    if data_gold:
+        plt.plot(model_gold.T[2] - model_gold.T[1], ':', color=colors[2], label="Noiseless humans + {}".format(LABELS.get(metric,metric)))
+    plt.plot(gold.T[2] - gold.T[1], ':', color=colors[4], label="Humans + perfect metric")
+
+    plt.xlim([0, 500])
+    plt.ylim([0.05, 0.2])
+
+    plt.legend()
+
+    if args.with_title:
+        task = first(key for key, values in PROMPTS.items() if prompt in values)
+        plt.title(r"\texttt{{{}}} on {} using the \texttt{{{}}} prompt".format(
+            LABELS.get(system, system),
+            LABELS.get(task, task),
+            LABELS.get(prompt, prompt),
+            ), fontsize=16)
+
+    plt.tight_layout()
+    plt.savefig(args.output)
 
 if __name__ == "__main__":
     import argparse
@@ -369,25 +339,15 @@ if __name__ == "__main__":
     command_parser.add_argument('systems', nargs='+', type=argparse.FileType('r'), help="Systems to plot")
     command_parser.set_defaults(func=do_model_correlation)
 
-    command_parser = subparsers.add_parser('estimation-trajectory', help='Plots a set of evaluation trajectories')
-    command_parser.add_argument('-o', '--output', type=str, default='trajectory.pdf', help="Path to output the plot of evaluation trajectories.")
-    command_parser.add_argument('--xlim', type=int, default=2000, help="Extent to which to plot")
-    command_parser.add_argument('-Tm', '--transform-mean', type=bool, default=True, help="Tranform data to mean")
-    command_parser.add_argument('-Tf', '--transform-final', type=bool, default=False, help="Tranform data to mean")
-    command_parser.add_argument('-Xc', '--center', type=bool, default=True, help="Tranform data to mean")
-    command_parser.add_argument('systems', type=GzipFileType('rt'), nargs='+', help="List of trajectory files to plot.")
-    command_parser.set_defaults(func=do_estimation_trajectory)
-
-    command_parser = subparsers.add_parser('variance-trajectory', help='Plots a set of evaluation trajectories')
-    command_parser.add_argument('-o', '--output', type=str, default='trajectory.pdf', help="Path to output the plot of evaluation trajectories.")
-    command_parser.add_argument('--xlim', type=int, default=2000, help="Extent to which to plot")
-    command_parser.add_argument('systems', type=GzipFileType('rt'), nargs='+', help="List of trajectory files to plot.")
-    command_parser.set_defaults(func=do_variance_trajectory)
-
-    command_parser = subparsers.add_parser('coefficients', help='Plots coefficients between responses')
-    command_parser.add_argument('-i', '--input', type=GzipFileType('rt'), default=sys.stdin, help="Path to an input dataset.")
-    command_parser.add_argument('-o', '--output', type=str, default='coefficients.pdf', help="Path to output the plot of evaluation trajectories.")
-    command_parser.set_defaults(func=do_coefficients)
+    command_parser = subparsers.add_parser('trajectory', help='Plot a trajectory for an estimator')
+    command_parser.add_argument('-i',  '--input',       type=str, default="lqual/lqual_trajectories.json", help="")
+    command_parser.add_argument('-ig', '--input-gold',  type=str, help="")
+    command_parser.add_argument('-o',  '--output',      type=str, default="lqual_trajectory.pdf", help="An example trajectory for a task")
+    command_parser.add_argument('-Dp', '--data-prompt', type=str, default="hter", help="An example trajectory for a task")
+    command_parser.add_argument('-Dm', '--data-metric', type=str, default="sim", help="An example trajectory for a task")
+    command_parser.add_argument('-Ds', '--data-system', type=str, default="seq2seq", help="An example trajectory for a task")
+    command_parser.add_argument('-wt', '--with-title',  action="store_true", help="An example trajectory for a task")
+    command_parser.set_defaults(func=do_trajectory)
 
     ARGS = parser.parse_args()
     if ARGS.func is None:
