@@ -262,6 +262,14 @@ def do_correlation_table(args):
     plt.xlabel("Systems")
     plt.ylabel("Metrics")
 
+    if args.with_title:
+        task = first(key for key, values in PROMPTS.items() if args.data_prompt in values)
+        plt.title(r"Correlations on {}".format(
+            LABELS.get(task, task),
+            ), fontsize=16)
+
+
+
     plt.tight_layout()
     plt.savefig(args.output)
 
@@ -332,6 +340,7 @@ if __name__ == "__main__":
     command_parser.add_argument('-i', '--input', type=str, default="lqual_correlation.jsonl", help="Bias data")
     command_parser.add_argument('-Dp', '--data-prompt', type=str, default="hter", help="An example trajectory for a task")
     command_parser.add_argument('-o', '--output', type=str, default="model_correlation.pdf", help="Where to save plot")
+    command_parser.add_argument('-wt', '--with-title',  action="store_true", help="An example trajectory for a task")
     command_parser.set_defaults(func=do_correlation_table)
 
     command_parser = subparsers.add_parser('model-correlation', help='Plot the correlation of a models output with truth')
