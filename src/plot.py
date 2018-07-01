@@ -305,6 +305,7 @@ def do_correlation_table(args):
         data = load_jsonl(f)
     data = make_correlation(data)
     data = data[args.data_prompt]
+
     metrics = sorted(data.keys())
     systems = ["seq2seq", "pointer", "ml", "ml+rl", "*"]
 
@@ -319,10 +320,9 @@ def do_correlation_table(args):
     plt.imshow(abs(X), cmap="viridis", origin="lower", aspect="auto", vmin=0.1, vmax=0.5)
 
     # Add the text
-    x_start, x_end, y_start, y_end = 0, 0, 0, 0
     y_size, x_size = X.shape
-    x_positions = np.linspace(start=x_start, stop=x_size, num=x_size, endpoint=False)
-    y_positions = np.linspace(start=y_start, stop=y_size, num=y_size, endpoint=False)
+    x_positions = np.linspace(start=0, stop=x_size, num=x_size, endpoint=False)
+    y_positions = np.linspace(start=0, stop=y_size, num=y_size, endpoint=False)
 
     for y_index, y in enumerate(y_positions):
         for x_index, x in enumerate(x_positions):
