@@ -30,16 +30,17 @@ def _s():
 def rouge(hyp, ref, n=None):
     # 1 - 4, L
     hyp, ref = " ".join(hyp), " ".join(ref)
-    ret = Pythonrouge(summary_file_exist=False,
+    ret = Pythonrouge(
+        summary_file_exist=False,
         summary=[[hyp]], reference=[[[ref]]],
-        n_gram=2, ROUGE_SU4=True, ROUGE_L=False,
+        n_gram=4, ROUGE_SU4=True, ROUGE_L=True,
         recall_only=True, stemming=True, stopwords=True,
         word_level=True, length_limit=True, length=50,
         use_cf=False, cf=95, scoring_formula='average',
         resampling=True, samples=1000, favor=True, p=0.5).calc_score()
 
     if n is None: return ret
-    else: return ret["ROUGE-"+n]["f"]
+    else: return ret["rouge-"+n]["f"]
 
 def bleu(hyp, refs, n=2, smooth=True):
     # 1 - 4
