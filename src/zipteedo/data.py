@@ -1,3 +1,0 @@
-"""
-Zipteedo: fast turking.
-"""

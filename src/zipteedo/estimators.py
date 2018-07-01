@@ -48,23 +48,6 @@ def model_variate(_g0=None, _var_g=None, estimate_scale=True, **_):
         return ret
     return _ret
 
-def _linear(data):
-    """
-    Returns truth according to linear estimation
-    """
-    for datum in data:
-        datum['yi'] = list(range(len(datum['ys'])))
-    A, y = encode_data_linear(data)
-    c = sc.linalg.solve(A, np.ones(len(y)), sym_pos=True)
-    c /= c.sum()
-    return c.dot(y)
-
-def _simple(data, use_gold=False):
-    """
-    Returns truth according to linear estimation
-    """
-    return np.mean([y for datum in data for y in ([datum['y*']] if use_gold else datum['ys'])])
-
 def _estimate_sigmas(data):
     annotators = sorted({a for datum in data for a in datum['as']})
     tasks  = list(range(len(data)))
