@@ -10,7 +10,7 @@ import scipy.stats as scstats
 
 from .util import first
 
-def get_variance_stats(data):
+def _get_variance_stats(data):
     prompts = list(first(data)["prompts"])
     systems = sorted({datum["system"] for datum in data})
 
@@ -56,6 +56,25 @@ def get_variance_stats(data):
             }
     return ret
 
+def _get_ci(data, n=1000):
+    # Get CI by bootstrapping...
+    N = len(data)
+    stats = []
+    for _ in range(n):
+        stats.append(data[np.random.randint(0, N, (N,))].mean())
+    stats = data.mean() - np.array(stats)
+    return data.mean() + np.percentile(stats, 90), data.mean() + np.percentile(stats, 10)
+
+def _get_de(baseline, other):
+    baseline_len = (baseline.T[2] - baseline.T[1])
+    other_len = (other.T[2] - other.T[1])
+    N = len(baseline_len)
+    a, b = int(0.1 * N), int(1 * N)
+
+    #ret = np.mean(baseline_len[a:b]**2 / other_len[a:b]**2)
+    ret = np.mean(baseline_len[a:b] / other_len[a:b])**2
+
+    return ret
 
 def get_correlations(data):
     metrics = list(first(first(data)["prompts"].values()))
@@ -90,7 +109,6 @@ def get_correlations(data):
                 ret[prompt][metric][system] = v
     return ret
 
-
 def get_data_efficiencies(data):
     # Group data appropriately.
     data = {(datum["metric"], datum["prompt"], datum["system"], datum["estimator"]): datum for datum in data}
@@ -103,16 +121,70 @@ def get_data_efficiencies(data):
     for metric, prompt, system in tqdm(settings, desc="settings"):
         simple = np.array(data[metric,prompt,system,"simple"]["summary"])
         model_variate = np.array(data[metric,prompt,system,"model_variate"]["summary"])
-        ret[metric][prompt][system] = get_de(simple, model_variate)
+        ret[metric][prompt][system] = _get_de(simple, model_variate)
     return ret
 
-def get_de(baseline, other):
-    baseline_len = (baseline.T[2] - baseline.T[1])
-    other_len = (other.T[2] - other.T[1])
-    N = len(baseline_len)
-    a, b = int(0.1 * N), int(1 * N)
+def group_by_system(data, prompt, metric):
+    by_system = defaultdict(dict)
+    for datum in data:
+        id_ = datum["id"]
+        system = datum['system']
 
-    #ret = np.mean(baseline_len[a:b]**2 / other_len[a:b]**2)
-    ret = np.mean(baseline_len[a:b] / other_len[a:b])**2
+        y, y_ = datum["prompts"][prompt]["gold"], datum["prompts"][prompt][metric]
+        assert y is not None and y_ is not None
+
+        by_system[system][id_] = (y, y_)
+    return by_system
+
+def simulate_bias(data, mu, system, condition="ll"):
+    systems = sorted(data)
+    ret = {}
+
+    for id_, (y, y_) in data[system].items():
+        candidates = []
+        for system_ in systems:
+            if id_ not in data[system_]: continue
+            z, z_ = data[system_][id_]
+            # Take bad low-ROUGE examples and make them good
+            if condition == "lr" and y_ < mu[1] and z_ < mu[1] and z > y:
+                candidates.append((z, z_))
+            # Take good low-ROUGE examples and make them bad
+            elif condition == "ll" and y_ < mu[1] and z_ < mu[1] and z < y:
+                candidates.append((z, z_))
+            # Take low-ROUGE examples and make them high-ROUGE
+            if condition == "ur" and y_ < mu[1] and z_ > mu[1]:
+                candidates.append((z, z_))
+            # Take low-ROUGE examples and make them high-ROUGE
+            elif condition == "ul" and y_ < mu[1] and z_ > mu[1] and z_ < y_:
+                candidates.append((z, z_))
+
+        if condition.endswith("r"):
+            ret[id_] = min(candidates) if candidates else (y, y_)
+        elif condition.endswith("l"):
+            ret[id_] = max(candidates) if candidates else (y, y_)
+
+    return ret
+
+def make_bias_table(data, prompt, metric, conditions=None):
+    by_system = group_by_system(data, prompt, metric)
+    if "reference" in by_system:
+        del by_system["reference"]
+    if conditions is None:
+        conditions = ["ll", "lr", "ul", "ur"]
+
+    overall = np.array([[y,y_] for vs in by_system.values() for y, y_ in vs.values()])
+    mu = overall.mean(0)
+
+    def _stats(vs):
+        xy = np.array(list(vs.values()))
+        x, (x_l, x_u) = xy.T[0].mean(), _get_ci(xy.T[0])
+        y, (y_l, y_u) = xy.T[1].mean(), _get_ci(xy.T[1])
+        return (x, x_l, x_u), (y, y_l, y_u)
+
+    ret = defaultdict(dict)
+    for system, vs in by_system.items():
+        ret[system]["default"] = _stats(vs)
+        for condition in conditions:
+            ret[system][condition] = _stats(simulate_bias(by_system, mu, system, condition))
 
     return ret

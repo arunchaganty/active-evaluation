@@ -15,7 +15,7 @@ import matplotlib.cm as cm
 import matplotlib.patches as mp
 
 from zipteedo.util import GzipFileType, load_jsonl, first
-from zipteedo.stats import get_correlations, get_data_efficiencies
+from zipteedo.stats import get_correlations, get_data_efficiencies, make_bias_table
 from zipteedo.viz import draw_matrix
 import zipteedo.estimators as zpe
 
@@ -48,66 +48,6 @@ PROMPTS = {
     "lqual": ["hter", "overall", "redundancy", "grammar"],
     "msmarco": ["AnyCorrect", "AvgCorrect"],
     }
-
-
-
-def do_bias_plot(args):
-    data = load_jsonl(args.input)
-    xy = np.array([[y, y_] for _, y, y_ in data[:4]])
-    XY = np.array(sorted([[y, y_] for _, y, y_ in data], key=lambda l: l[0]))
-
-    xlim = np.array([XY.T[0].min(), XY.T[0].max()])
-    coeffs = np.polyfit(xy.T[0], xy.T[1])
-    # Plot y == x line
-    plt.plot(xlim, xlim * coeffs[0] + coeffs[1], linestyle='--', linewidth=2)
-    plt.plot(XY.T[0], XY.T[1])
-    plt.scatter(xy.T[0], xy.T[1], 400, marker="*")
-    plt.xlabel("Human judgement")
-    plt.ylabel("ROUGE-L")
-    plt.tight_layout()
-    plt.savefig(args.output)
-
-
-def do_system_correlation(args):
-    data = [json.loads(line) for line in open(args.input)]
-    systems = SYSTEMS["task"]
-
-    colors = cm.Dark2.colors[:4]
-    #ix = SYSTEMS.index(args.data_system)
-
-    ids = [vs[0] for vs in data]
-    XY = np.array([vs[1:] for vs in data])
-    xy = XY[[ids.index(system) for system in systems]]
-    xy_lr = XY[[ids.index("{}-{}".format(system, 'lr')) for system in systems ]]
-    xy_ll = XY[[ids.index("{}-{}".format(system, 'll')) for system in systems ]]
-    xy_ur = XY[[ids.index("{}-{}".format(system, 'ur')) for system in systems ]]
-    xy_ul = XY[[ids.index("{}-{}".format(system, 'ul')) for system in systems ]]
-
-    print("rho", scstats.pearsonr(xy.T[0], xy.T[1]))
-
-    #metrics = ["rouge-l", "rouge-1", "rouge-2", "meteor", "bleu", "sim", "gold",]
-
-    plt.rc("font", size=20)
-    plt.rc("text", usetex=True)
-    #plt.rc("figure", figsize=(10,10))
-
-    xlim = np.array([XY.T[0].min(), XY.T[0].max()])
-    coeffs = np.polyfit(xy.T[0], xy.T[3], 1)
-    # Plot y == x line
-    plt.plot(xlim, xlim * coeffs[0] + coeffs[1], linestyle='--', linewidth=2, zorder=-1)
-    for _xy in [xy, xy_lr, xy_ur]:
-        plt.errorbar(_xy.T[0], _xy.T[3], xerr=[_xy.T[0]-_xy.T[1],_xy.T[2]-_xy.T[0]], yerr=[_xy.T[3]-_xy.T[4], _xy.T[5]-_xy.T[3]], capsize=2, alpha=0.5, linestyle='', marker="", zorder=-1)
-
-    plt.scatter(xy_lr.T[0], xy_lr.T[3], color=colors, marker=">")
-    plt.scatter(xy_ur.T[0], xy_ur.T[3], color=colors, marker="^")
-    #plt.scatter(xy_ll.T[0], xy_ll.T[3], color=colors, marker="<")
-    #plt.scatter(xy_ul.T[0], xy_ul.T[3], color=colors[ix], marker="<")
-    pts = plt.scatter(xy.T[0], xy.T[3], 100, c=colors, marker="o")
-    plt.xlabel("Human judgement")
-    plt.ylabel("ROUGE-L")
-    plt.tight_layout()
-    plt.legend(handles=[mp.Patch(color=colors[i], label=LABELS.get(system, system)) for i, system in enumerate(systems)])
-    plt.savefig(args.output)
 
 
 def do_correlation_table(args):
@@ -230,6 +170,59 @@ def do_data_efficiency_table(args):
     plt.tight_layout()
     plt.savefig(args.output)
 
+def do_system_correlation(args):
+    data = [json.loads(line) for line in open(args.input)]
+    prompt, metric = args.data_prompt, args.data_metric
+    task = first(key for key, values in PROMPTS.items() if prompt in values)
+    systems = SYSTEMS[task]
+
+    # Group by data by system.
+    data = make_bias_table(data, prompt, metric, ["lr", "ur"])
+
+    plt.rc("font", size=20)
+    plt.rc("text", usetex=True)
+    plt.rc("figure", figsize=(8,6))
+    colors = cm.Dark2.colors[:4]
+
+    # 0. Plot the xy correlation curve.
+    xy = np.array([[x, y] for system in systems for (x, *_), (y, *_) in [data[system]["default"]]])
+    xlim = np.array([xy.T[0].min(), xy.T[0].max()])
+    coeffs = np.polyfit(xy.T[0], xy.T[1], 1)
+    plt.plot(xlim, xlim * coeffs[0] + coeffs[1], linestyle='--', linewidth=2, zorder=-1)
+
+    # 1. Plot actual data points with error bars.
+    xy = np.array([[x, y] for system in systems for (x, *_), (y, *_) in data[system].values()])
+    xy_l = np.array([[x, y] for system in systems for (_, x, _), (_, y, _) in data[system].values()])
+    xy_u = np.array([[x, y] for system in systems for (_, _, x), (_, _, y) in data[system].values()])
+    plt.errorbar(xy.T[0], xy.T[1],
+                 xerr=[(xy - xy_l).T[0], (xy_u - xy).T[0]],
+                 yerr=[(xy - xy_l).T[1], (xy_u - xy).T[1]],
+                 capsize=2, alpha=0.5, linestyle='', marker="", zorder=-1)
+
+    # 2. Plot markers.
+    xy = np.array([[x, y] for system in systems for (x, *_), (y, *_) in [data[system]["default"]]])
+    xy_lr = np.array([[x, y] for system in systems for (x, *_), (y, *_) in [data[system]["lr"]]])
+    xy_ur = np.array([[x, y] for system in systems for (x, *_), (y, *_) in [data[system]["ur"]]])
+
+    plt.scatter(xy_lr.T[0], xy_lr.T[1], color=colors, marker=">")
+    plt.scatter(xy_ur.T[0], xy_ur.T[1], color=colors, marker="^")
+    plt.scatter(xy.T[0], xy.T[1], 100, c=colors, marker="o")
+    plt.xlabel(r"Human judgement (\texttt{{{}}})".format(LABELS.get(prompt, prompt)))
+    plt.ylabel(LABELS.get(metric, metric))
+
+    if args.with_title:
+        task = first(key for key, values in PROMPTS.items() if prompt in values)
+        plt.title(r"System-level correlation on {}".format(
+            LABELS.get(task, task),
+            ), fontsize=16)
+
+    plt.tight_layout()
+
+    plt.legend(handles=[mp.Patch(color=colors[i], label=LABELS.get(system, system)) for i, system in enumerate(systems)])
+
+    plt.savefig(args.output)
+
+
 
 if __name__ == "__main__":
     import argparse
@@ -241,7 +234,10 @@ if __name__ == "__main__":
     command_parser = subparsers.add_parser('system-correlation', help='Plot the system-wide correlation of a models output with truth')
     command_parser.add_argument('-i', '--input', type=str, default="lqual_bias.json", help="Bias data")
     command_parser.add_argument('-t', '--task', type=str, choices=["lqual", "msmarco"], default="lqual", help="Bias data")
+    command_parser.add_argument('-Dp', '--data-prompt', type=str, default="overall", help="An example trajectory for a task")
+    command_parser.add_argument('-Dm', '--data-metric', type=str, default="sim", help="An example trajectory for a task")
     command_parser.add_argument('-o', '--output', type=str, default="model_correlation.pdf", help="Where to save plot")
+    command_parser.add_argument('-wt', '--with-title',  action="store_true", help="An example trajectory for a task")
     command_parser.set_defaults(func=do_system_correlation)
 
     command_parser = subparsers.add_parser('correlation-table', help='Plot the system-wide correlation of a models output with truth')
