@@ -5,7 +5,7 @@ Plot various visualizations
 """
 import sys
 import json
-from collections import defaultdict
+from collections import Counter
 
 
 import numpy as np
@@ -182,7 +182,7 @@ def do_system_correlation(args):
     plt.rc("font", size=20)
     plt.rc("text", usetex=True)
     plt.rc("figure", figsize=(8,6))
-    colors = cm.Dark2.colors[:4]
+    colors = cm.Dark2.colors[:len(systems)]
 
     # 0. Plot the xy correlation curve.
     xy = np.array([[x, y] for system in systems for (x, *_), (y, *_) in [data[system]["default"]]])
@@ -222,6 +222,80 @@ def do_system_correlation(args):
 
     plt.savefig(args.output)
 
+def _snap(vs, points):
+    ret = []
+    for x, y in vs:
+        ret.append((first(x_ for x_ in points if x_ >= x), y))
+    return np.array(ret)
+
+
+def do_instance_correlation(args):
+    data = [json.loads(line) for line in open(args.input)]
+    prompt, metric = args.data_prompt, args.data_metric
+    task = first(key for key, values in PROMPTS.items() if prompt in values)
+    systems = SYSTEMS[task]
+
+    # Group by data by system.
+    plt.rc("font", size=20)
+    plt.rc("text", usetex=True)
+    plt.rc("figure", figsize=(6,8))
+    colors = cm.Dark2.colors[:len(systems)]
+
+    # 1. How many distinct Y values exist?
+    fig, axs = plt.subplots(4, 1, sharex=True, sharey=True)
+
+    xy = {system: np.array([[datum["prompts"][prompt]["gold"], datum["prompts"][prompt][metric]] for datum in data if system in datum["system"].split(";")])
+            for system in systems}
+
+    if args.bins:
+        y = np.array([datum["prompts"][prompt]["gold"] for datum in data])
+        distinct_values = np.linspace(y.min(), y.max(), args.bins)
+        plt.xticks(distinct_values)
+
+        for system in systems:
+            xy[system] = _snap(xy[system], distinct_values)
+
+
+        # 2. Make violin plots.
+        for i, system in enumerate(systems):
+            x, y = xy[system].T[0], xy[system].T[1]
+            parts = axs[i].violinplot([y[x == v] for v in distinct_values], distinct_values, showmeans=True)
+            for name, cols in parts.items():
+                if name == "bodies":
+                    for pc in cols:
+                        pc.set_facecolor(colors[i])
+                else:
+                    cols.set_edgecolor(colors[i])
+
+    for i, system in enumerate(systems):
+        x, y = xy[system].T[0], xy[system].T[1]
+        axs[i].scatter(x, y, alpha=0.3, marker='.', color=colors[i])
+
+    for i, system in enumerate(systems):
+        xy = np.array([[datum["prompts"][prompt]["gold"], datum["prompts"][prompt][metric]] for datum in data if system in datum["system"].split(";")])
+        coeffs = np.polyfit(xy.T[0], xy.T[1], 1)
+        xlim = np.array([xy.T[0].min(), xy.T[0].max()])
+        axs[i].plot(xlim, xlim * coeffs[0] + coeffs[1], linestyle='--', linewidth=1, zorder=-1, color=colors[i])
+
+    for i, system in enumerate(systems):
+        axs[i].text(1.2, 0.5, LABELS.get(system, system), va='center', rotation='vertical')
+
+    plt.xlabel(r"Human judgement (\texttt{{{}}})".format(LABELS.get(prompt, prompt)))
+    #plt.text(-1, 0, LABELS.get(metric, metric), va="center")
+    fig.text(0.01, 0.5, LABELS.get(metric, metric), va='center', rotation='vertical')
+
+    if args.with_title:
+        task = first(key for key, values in PROMPTS.items() if prompt in values)
+        axs[0].set_title(r"Instance-level correlation on {}".format(
+            LABELS.get(task, task),
+            ), fontsize=16)
+
+    plt.subplots_adjust(wspace=0, hspace=0.05)
+    #plt.tight_layout()
+
+    #plt.legend(handles=[mp.Patch(color=colors[i], label=LABELS.get(system, system)) for i, system in enumerate(systems)])
+
+    plt.savefig(args.output)
 
 
 if __name__ == "__main__":
@@ -230,15 +304,6 @@ if __name__ == "__main__":
     parser.set_defaults(func=None)
 
     subparsers = parser.add_subparsers()
-
-    command_parser = subparsers.add_parser('system-correlation', help='Plot the system-wide correlation of a models output with truth')
-    command_parser.add_argument('-i', '--input', type=str, default="lqual_bias.json", help="Bias data")
-    command_parser.add_argument('-t', '--task', type=str, choices=["lqual", "msmarco"], default="lqual", help="Bias data")
-    command_parser.add_argument('-Dp', '--data-prompt', type=str, default="overall", help="An example trajectory for a task")
-    command_parser.add_argument('-Dm', '--data-metric', type=str, default="sim", help="An example trajectory for a task")
-    command_parser.add_argument('-o', '--output', type=str, default="model_correlation.pdf", help="Where to save plot")
-    command_parser.add_argument('-wt', '--with-title',  action="store_true", help="An example trajectory for a task")
-    command_parser.set_defaults(func=do_system_correlation)
 
     command_parser = subparsers.add_parser('correlation-table', help='Plot the system-wide correlation of a models output with truth')
     command_parser.add_argument('-i', '--input', type=str, default="lqual_correlation.jsonl", help="Bias data")
@@ -257,12 +322,30 @@ if __name__ == "__main__":
     command_parser = subparsers.add_parser('trajectory', help='Plot a trajectory for an estimator')
     command_parser.add_argument('-i',  '--input',       type=str, default="lqual/lqual_trajectories.json", help="")
     command_parser.add_argument('-ig', '--input-gold',  type=str, help="")
-    command_parser.add_argument('-o',  '--output',      type=str, default="lqual_trajectory.pdf", help="An example trajectory for a task")
+    command_parser.add_argument('-o',  '--output',      type=str, default="trajectory.pdf", help="An example trajectory for a task")
     command_parser.add_argument('-Dp', '--data-prompt', type=str, default="hter", help="An example trajectory for a task")
     command_parser.add_argument('-Dm', '--data-metric', type=str, default="sim", help="An example trajectory for a task")
     command_parser.add_argument('-Ds', '--data-system', type=str, default="seq2seq", help="An example trajectory for a task")
     command_parser.add_argument('-wt', '--with-title',  action="store_true", help="An example trajectory for a task")
     command_parser.set_defaults(func=do_trajectory)
+
+    command_parser = subparsers.add_parser('system-correlation', help='Plot the system-wide correlation of a models output with truth')
+    command_parser.add_argument('-i', '--input', type=str, default="lqual_bias.json", help="Bias data")
+    command_parser.add_argument('-Dp', '--data-prompt', type=str, default="overall", help="An example trajectory for a task")
+    command_parser.add_argument('-Dm', '--data-metric', type=str, default="sim", help="An example trajectory for a task")
+    command_parser.add_argument('-o', '--output', type=str, default="system_correlation.pdf", help="Where to save plot")
+    command_parser.add_argument('-wt', '--with-title',  action="store_true", help="An example trajectory for a task")
+    command_parser.set_defaults(func=do_system_correlation)
+
+    command_parser = subparsers.add_parser('instance-correlation', help='Plot the system-wide correlation of a models output with truth')
+    command_parser.add_argument('-i', '--input', type=str, default="lqual_bias.json", help="Bias data")
+    command_parser.add_argument('-Dp', '--data-prompt', type=str, default="overall", help="An example trajectory for a task")
+    command_parser.add_argument('-Dm', '--data-metric', type=str, default="sim", help="An example trajectory for a task")
+    command_parser.add_argument('-o', '--output', type=str, default="instance_correlation.pdf", help="Where to save plot")
+    command_parser.add_argument('-wt', '--with-title',  action="store_true", help="An example trajectory for a task")
+    command_parser.add_argument('-b', '--bins',  type=int, help="An example trajectory for a task")
+    command_parser.set_defaults(func=do_instance_correlation)
+
 
     ARGS = parser.parse_args()
     if ARGS.func is None:
