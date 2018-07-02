@@ -16,13 +16,12 @@ def simple(**_):
         return ret
     return _ret
 
-def model_variate(_g0=None, _var_g=None, estimate_scale=True, **_):
+def model_variate(_mean_g=None, _var_g=None, estimate_scale=True, **_):
     def _ret(_, gs, hs, anns):
         N = len(hs)
         z = np.arange(1, N+1)
 
-        # TODO: get mean_g, var_g from elsewhere
-        g0 = _g0 if _g0 is not None else np.mean(gs)
+        g0 = _mean_g if _mean_g is not None else np.mean(gs)
         var_g = _var_g if _var_g is not None else np.var(gs)
 
         # scale by rho*sigma_f/sigma_g
