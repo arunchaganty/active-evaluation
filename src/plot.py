@@ -14,141 +14,10 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.patches as mp
 
-from zipteedo.util import GzipFileType, load_jsonl
+from zipteedo.util import GzipFileType, load_jsonl, first
+from zipteedo.stats import get_correlations, get_data_efficiencies
+from zipteedo.viz import draw_matrix
 import zipteedo.estimators as zpe
-
-
-def get_correlation_table(data):
-    prompts = list(first(data)["prompts"])
-    systems = sorted({datum["system"] for datum in data})
-
-    ret = defaultdict(dict)
-
-    for prompt in prompts:
-        n_ = 0
-        sigma_f_ = []
-        sigma_a_ = []
-        for system in systems:
-            n = 0
-            sigma_f = []
-            sigma_a = []
-            for datum in data:
-                if datum['system'] != system: continue
-                hs = datum['prompts'][prompt]['human']
-                if len(hs) > 1:
-                    f = np.mean(hs)
-                    sigma_f.extend(hs)
-                    sigma_a.extend(hs - f)
-                    sigma_f_.extend(hs)
-                    sigma_a_.extend(hs - f)
-                    n += 1
-                    n_ += 1
-
-            sigma2_a = np.var(sigma_a, ddof=n)
-            sigma2_f = np.var(sigma_f, ddof=1) - sigma2_a
-            nu = sigma2_a/sigma2_f
-            ret[system][prompt] = {
-                "sigma2_a": sigma2_a ,
-                "sigma2_f": sigma2_f ,
-                "nu": nu ,
-                }
-
-        sigma2_a = np.var(sigma_a_, ddof=n_)
-        sigma2_f = np.var(sigma_f_, ddof=1) - sigma2_a
-        nu = sigma2_a/sigma2_f
-
-        ret["*"][prompt] = {
-            "sigma2_a": sigma2_a ,
-            "sigma2_f": sigma2_f ,
-            "nu": nu ,
-            }
-    return ret
-
-
-def make_correlation(data):
-    metrics = list(first(first(data)["prompts"].values()))
-    prompts = list(first(data)["prompts"])
-    systems = sorted({datum["system"] for datum in data})
-    metrics.remove("gold")
-    metrics.remove("human")
-    print(systems)
-
-    sigma_table = get_correlation_table(data)
-
-    agg = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
-    for datum in data:
-        system = datum['system']
-        for prompt in prompts:
-            for metric in metrics:
-                y, y_ = datum["prompts"][prompt]["gold"], datum["prompts"][prompt][metric]
-                assert y is not None
-                assert y_ is not None
-                agg[prompt][metric][system].append([y, y_])
-                agg[prompt][metric]["*"].append([y, y_])
-
-    # Finally aggregate.
-    ret = defaultdict(lambda: defaultdict(dict))
-    for prompt in prompts:
-        for metric in metrics:
-            for system in systems + ["*"]:
-                if system == "reference": continue
-                xy = np.array(agg[prompt][metric][system])
-                v = np.mean(xy.T[0] * xy.T[1] - np.mean(xy.T[0])*np.mean(xy.T[1]))/(np.sqrt(sigma_table[system][prompt]['sigma2_f']) * np.sqrt(np.var(xy.T[1], ddof=1)))
-                #v =  scstats.pearsonr(xy.T[0], xy.T[1])[0]
-                ret[prompt][metric][system] = v
-    return ret
-
-def first(x):
-    return next(iter(x))
-
-def get_colors(n_colors=1):
-    _colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
-
-    return _colors[:n_colors]
-
-    #if n_colors > 1:
-    #    colors = viridis.colors[::256//(n_colors-1)-1]
-    #else:
-    #    colors = [viridis.colors[0]] # some color is fine.
-    #return colors
-
-def do_model_correlation(args):
-    colors = get_colors(len(args.systems))
-    system_names = ["KenLM", "GoogleLM1B", "conv-model",]
-
-    plt.plot([0,1], [0,1], color='k') # Axes
-    for i, system in enumerate(args.systems):
-        data = np.array([[datum['y*'], datum['y^']] for datum in load_jsonl(system)])
-        rho, p = scstats.pearsonr(data.T[0], data.T[1])
-        system_name = system_names[i]
-
-        plt.scatter(data.T[0], data.T[1], color=colors[i], alpha=0.3, label=r"{} ($\rho = {:.2f}; p={:.2e}$)".format(system_name, rho, p))
-
-    plt.rc("text", usetex=True)
-    plt.rc("figure", figsize=(10,10))
-    plt.xlabel("True label")
-    plt.ylabel("Guessed label")
-    plt.xlim(0, 1)
-    plt.ylim(0, 1)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(args.output, dpi=400)
-
-def do_bias_plot(args):
-    data = load_jsonl(args.input)
-    xy = np.array([[y, y_] for _, y, y_ in data[:4]])
-    XY = np.array(sorted([[y, y_] for _, y, y_ in data], key=lambda l: l[0]))
-
-    xlim = np.array([XY.T[0].min(), XY.T[0].max()])
-    coeffs = np.polyfit(xy.T[0], xy.T[1])
-    # Plot y == x line
-    plt.plot(xlim, xlim * coeffs[0] + coeffs[1], linestyle='--', linewidth=2)
-    plt.plot(XY.T[0], XY.T[1])
-    plt.scatter(xy.T[0], xy.T[1], 400, marker="*")
-    plt.xlabel("Human judgement")
-    plt.ylabel("ROUGE-L")
-    plt.tight_layout()
-    plt.savefig(args.output)
 
 LABELS = {
     "rouge-l": "ROUGE-L",
@@ -176,9 +45,28 @@ SYSTEMS = {
     }
 
 PROMPTS = {
-    "lqual": ["hter", "overall", "redundancy", "fluency"],
+    "lqual": ["hter", "overall", "redundancy", "grammar"],
     "msmarco": ["AnyCorrect", "AvgCorrect"],
     }
+
+
+
+def do_bias_plot(args):
+    data = load_jsonl(args.input)
+    xy = np.array([[y, y_] for _, y, y_ in data[:4]])
+    XY = np.array(sorted([[y, y_] for _, y, y_ in data], key=lambda l: l[0]))
+
+    xlim = np.array([XY.T[0].min(), XY.T[0].max()])
+    coeffs = np.polyfit(xy.T[0], xy.T[1])
+    # Plot y == x line
+    plt.plot(xlim, xlim * coeffs[0] + coeffs[1], linestyle='--', linewidth=2)
+    plt.plot(XY.T[0], XY.T[1])
+    plt.scatter(xy.T[0], xy.T[1], 400, marker="*")
+    plt.xlabel("Human judgement")
+    plt.ylabel("ROUGE-L")
+    plt.tight_layout()
+    plt.savefig(args.output)
+
 
 def do_system_correlation(args):
     data = [json.loads(line) for line in open(args.input)]
@@ -221,14 +109,17 @@ def do_system_correlation(args):
     plt.legend(handles=[mp.Patch(color=colors[i], label=LABELS.get(system, system)) for i, system in enumerate(systems)])
     plt.savefig(args.output)
 
+
 def do_correlation_table(args):
     with open(args.input) as f:
         data = load_jsonl(f)
-    data = make_correlation(data)
+    data = get_correlations(data)
     data = data[args.data_prompt]
 
+    prompt = args.data_prompt
     metrics = sorted(data.keys())
-    systems = ["seq2seq", "pointer", "ml", "ml+rl", "*"]
+    task = first(key for key, values in PROMPTS.items() if prompt in values)
+    systems = SYSTEMS[task] + ["*"]
 
     X = np.array([[data[metric][system] for system in systems] for metric in metrics])
 
@@ -236,42 +127,24 @@ def do_correlation_table(args):
     plt.rc("text", usetex=True)
     #plt.rc("figure", figsize=(10,10))
 
-    fig, ax = plt.subplots()
+    draw_matrix(X, with_values=True,
+                x_labels=[LABELS.get(s, s) for s in systems],
+                y_labels=[LABELS.get(m, m) for m in metrics],)
 
-    plt.imshow(abs(X), cmap="viridis", origin="lower", aspect="auto", vmin=0.1, vmax=0.5)
-
-    # Add the text
-    y_size, x_size = X.shape
-    x_positions = np.linspace(start=0, stop=x_size, num=x_size, endpoint=False)
-    y_positions = np.linspace(start=0, stop=y_size, num=y_size, endpoint=False)
-
-    for y_index, y in enumerate(y_positions):
-        for x_index, x in enumerate(x_positions):
-            label = "{:.2f}".format(X[y_index, x_index])
-            text_x = x + 0  # jump_x
-            text_y = y + 0  # jump_y
-            ax.text(text_x, text_y, label, color='white', ha='center', va='center', fontsize=11)
-
-
-
-    ax.set_xticks(np.arange(len(systems)))
-    ax.set_yticks(np.arange(len(metrics)))
-    ax.set_xticklabels([LABELS.get(s, s) for s in systems], rotation=45)
-    ax.set_yticklabels([LABELS.get(s, s) for s in metrics])
     plt.colorbar(label=r"Pearson $\rho$")
     plt.xlabel("Systems")
     plt.ylabel("Metrics")
 
     if args.with_title:
-        task = first(key for key, values in PROMPTS.items() if args.data_prompt in values)
-        plt.title(r"Correlations on {}".format(
+        task = first(key for key, values in PROMPTS.items() if prompt in values)
+        plt.title(r"Correlations on {} using the \texttt{{{}}} prompt".format(
             LABELS.get(task, task),
+            LABELS.get(prompt, prompt),
             ), fontsize=16)
-
-
 
     plt.tight_layout()
     plt.savefig(args.output)
+
 
 def do_trajectory(args):
     data = [json.loads(line) for line in open(args.input, "rt")]
@@ -323,6 +196,41 @@ def do_trajectory(args):
     plt.tight_layout()
     plt.savefig(args.output)
 
+
+def do_data_efficiency_table(args):
+    data = [json.loads(line) for line in open(args.input, "rt")]
+    data = get_data_efficiencies(data)
+
+    prompt = args.data_prompt
+    metrics = sorted(data.keys())
+    task = first(key for key, values in PROMPTS.items() if prompt in values)
+    systems = SYSTEMS[task]
+
+    X = np.array([[data[metric][prompt][system]**2 for system in systems] for metric in metrics])
+
+    plt.rc("font", size=20)
+    plt.rc("text", usetex=True)
+
+    draw_matrix(X, with_values=True,
+                x_labels=[LABELS.get(s, s) for s in systems],
+                y_labels=[LABELS.get(m, m) for m in metrics],
+                vmin=0.9, vmax=1.5)
+
+    plt.colorbar(label="Data efficiency")
+    plt.xlabel("Systems")
+    plt.ylabel("Metrics")
+
+    if args.with_title:
+        plt.title(r"Data efficiencies on {} using the \texttt{{{}}} prompt".format(
+            LABELS.get(task, task),
+            LABELS.get(prompt, prompt),
+            ), fontsize=16)
+
+
+    plt.tight_layout()
+    plt.savefig(args.output)
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='')
@@ -339,14 +247,16 @@ if __name__ == "__main__":
     command_parser = subparsers.add_parser('correlation-table', help='Plot the system-wide correlation of a models output with truth')
     command_parser.add_argument('-i', '--input', type=str, default="lqual_correlation.jsonl", help="Bias data")
     command_parser.add_argument('-Dp', '--data-prompt', type=str, default="hter", help="An example trajectory for a task")
-    command_parser.add_argument('-o', '--output', type=str, default="model_correlation.pdf", help="Where to save plot")
+    command_parser.add_argument('-o', '--output', type=str, default="correlations.pdf", help="Where to save plot")
     command_parser.add_argument('-wt', '--with-title',  action="store_true", help="An example trajectory for a task")
     command_parser.set_defaults(func=do_correlation_table)
 
-    command_parser = subparsers.add_parser('model-correlation', help='Plot the correlation of a models output with truth')
-    command_parser.add_argument('-o', '--output', type=str, default="model_correlation.pdf", help="Where to save plot")
-    command_parser.add_argument('systems', nargs='+', type=argparse.FileType('r'), help="Systems to plot")
-    command_parser.set_defaults(func=do_model_correlation)
+    command_parser = subparsers.add_parser('data-efficiency-table', help='Plot data efficiencies for different systems and automatic metrics')
+    command_parser.add_argument('-i', '--input', type=str, default="lqual_trajectories.jsonl", help="Trajecotry data")
+    command_parser.add_argument('-Dp', '--data-prompt', type=str, default="hter", help="An example trajectory for a task")
+    command_parser.add_argument('-o', '--output', type=str, default="data_efficiencies.pdf", help="Where to save plot")
+    command_parser.add_argument('-wt', '--with-title',  action="store_true", help="An example trajectory for a task")
+    command_parser.set_defaults(func=do_data_efficiency_table)
 
     command_parser = subparsers.add_parser('trajectory', help='Plot a trajectory for an estimator')
     command_parser.add_argument('-i',  '--input',       type=str, default="lqual/lqual_trajectories.json", help="")
