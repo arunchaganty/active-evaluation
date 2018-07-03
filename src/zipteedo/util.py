@@ -157,7 +157,12 @@ def dictstr(x):
     if "=" in x:
         k, v = x.split("=")
         # Try to parse v.
-        return (k, trynumber(v))
+        if v.lower() == "false":
+            return (k, False)
+        if v.lower() == "true":
+            return (k, True)
+        else:
+            return (k, trynumber(v))
     else:
         return (x, True)
 
