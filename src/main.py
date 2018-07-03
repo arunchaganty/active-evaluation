@@ -191,12 +191,12 @@ def do_build_table(args):
 
         args.estimator = "simple"
         trajectory = bootstrap_trajectory(fs, gs, hs, anns, get_estimator(args), args.num_epochs)
-        simple = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)]).T
+        simple = np.stack([np.mean(trajectory, 0), truth + np.percentile(trajectory - truth, 10, 0), truth + np.percentile(trajectory - truth, 90, 0)]).T
         trajectories.append(report_trajectory(args, truth, simple))
 
         args.estimator = "model_variate"
         trajectory = bootstrap_trajectory(fs, gs, hs, anns, get_estimator(args), args.num_epochs)
-        mv = np.stack([np.mean(trajectory, 0), truth + np.percentile(truth - trajectory, 10, 0), truth + np.percentile(truth - trajectory, 90, 0)]).T
+        mv = np.stack([np.mean(trajectory, 0), truth + np.percentile(trajectory - truth, 10, 0), truth + np.percentile(trajectory - truth, 90, 0)]).T
 
         trajectories.append(report_trajectory(args, truth, mv))
 
