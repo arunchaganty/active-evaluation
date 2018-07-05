@@ -2,6 +2,8 @@
 Common, useful visualization routines.
 """
 import numpy as np
+import matplotlib
+matplotlib.use("agg")
 import matplotlib.pyplot as plt
 
 def draw_matrix(X, x_labels=None, y_labels=None, with_values=True, vmin=None, vmax=None):

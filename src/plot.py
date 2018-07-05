@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Plot various visualizations
 """
@@ -10,9 +8,13 @@ from collections import Counter
 
 import numpy as np
 import scipy.stats as scstats
+import matplotlib
+matplotlib.use("agg")
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.patches as mp
+
+
 
 from zipteedo.util import GzipFileType, load_jsonl, first
 from zipteedo.stats import get_correlations, get_data_efficiencies, make_bias_table
