@@ -158,7 +158,7 @@ def do_data_efficiency_table(args):
     draw_matrix(X, with_values=True,
                 x_labels=[LABELS.get(s, s) for s in systems],
                 y_labels=[LABELS.get(m, m) for m in metrics],
-                vmin=0.9, vmax=1.5)
+                vmin=0.9, vmax=1.3)
 
     plt.colorbar(label="Data efficiency")
     plt.xlabel("Systems")
