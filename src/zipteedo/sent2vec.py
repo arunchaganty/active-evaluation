@@ -20,14 +20,15 @@ class Sent2Vec:
             self.cmd[0], self.cmd[1:],
             cwd=os.path.dirname(os.path.abspath(__file__)),
             encoding="utf8",
+            echo=False,
             timeout=300)
 
     def _comm(self, line):
         line = line.strip()
         self.child.sendline(line)
         resp = self.child.readline().strip()
-        assert resp == line, "Expected {}, got {}".format(line, resp)
-        resp = self.child.readline().strip()
+        #assert resp == line, "Expected {}, got {}".format(line, resp)
+        #resp = self.child.readline().strip()
         return resp
 
     def embed(self, x):
