@@ -69,10 +69,14 @@ def _get_de(baseline, other):
     baseline_len = (baseline.T[2] - baseline.T[1])
     other_len = (other.T[2] - other.T[1])
     N = len(baseline_len)
-    a, b = int(0.1 * N), int(1 * N)
+    a, b = int(0.2 * N), int(0.9 * N)
 
-    #ret = np.mean(baseline_len[a:b]**2 / other_len[a:b]**2)
-    ret = np.mean(baseline_len[a:b] / other_len[a:b])**2
+    x, y = baseline_len[a:b]**2, other_len[a:b]**2
+    mu_x, mu_y, mu_xy = np.mean(x), np.mean(y), np.mean(x * y)
+    v_x, v_xy = np.var(x), mu_xy - mu_x * mu_y
+    r = mu_x / mu_y
+    c2_x = v_x / mu_x**2
+    ret = r + c2_x * mu_y / mu_x - v_xy / mu_x**2
 
     return ret
 
