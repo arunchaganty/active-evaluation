@@ -18,7 +18,7 @@ import matplotlib.patches as mp
 
 from zipteedo.util import GzipFileType, load_jsonl, first
 from zipteedo.stats import get_correlations, get_data_efficiencies, make_bias_table
-from zipteedo.viz import draw_matrix
+from zipteedo.viz import draw_matrix, violinplot
 import zipteedo.estimators as zpe
 
 LABELS = {
@@ -227,6 +227,7 @@ def do_system_correlation(args):
 
     plt.savefig(args.output)
 
+
 def _snap(vs, points):
     ret = []
     for x, y in vs:
@@ -263,17 +264,9 @@ def do_instance_correlation(args):
         for system in systems:
             xy[system] = _snap(xy[system], distinct_values)
 
-
         # 2. Make violin plots.
         for i, system in enumerate(systems):
-            x, y = xy[system].T[0], xy[system].T[1]
-            parts = axs[i].violinplot([y[x == v] for v in distinct_values], distinct_values, showmeans=True)
-            for name, cols in parts.items():
-                if name == "bodies":
-                    for pc in cols:
-                        pc.set_facecolor(colors[i])
-                else:
-                    cols.set_edgecolor(colors[i])
+            violinplot(axs[i], xy[system], distinct_values, colors[i])
 
     for i, system in enumerate(systems):
         x, y = xy[system].T[0], xy[system].T[1]
