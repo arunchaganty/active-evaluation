@@ -246,7 +246,10 @@ def do_instance_correlation(args):
     # 1. How many distinct Y values exist?
     fig, axs = plt.subplots(4, 1, sharex=True, sharey=True)
 
-    xy = {system: np.array([[datum["prompts"][prompt]["gold"], datum["prompts"][prompt][metric]] for datum in data if system in datum["system"].split(";")])
+    def _thresh(y):
+        return max(min(y, 1), -1)
+
+    xy = {system: np.array([[datum["prompts"][prompt]["gold"], _thresh(datum["prompts"][prompt][metric])] for datum in data if system in datum["system"].split(";")])
             for system in systems}
 
     if args.bins:
@@ -332,7 +335,7 @@ if __name__ == "__main__":
     command_parser.set_defaults(func=do_trajectory)
 
     command_parser = subparsers.add_parser('system-correlation', help='Plot the system-wide correlation of a models output with truth')
-    command_parser.add_argument('-i', '--input', type=str, default="lqual_bias.json", help="Bias data")
+    command_parser.add_argument('-i', '--input', type=str, default="lqual.json", help="Bias data")
     command_parser.add_argument('-Dp', '--data-prompt', type=str, default="overall", help="An example trajectory for a task")
     command_parser.add_argument('-Dm', '--data-metric', type=str, default="sim", help="An example trajectory for a task")
     command_parser.add_argument('-o', '--output', type=str, default="system_correlation.pdf", help="Where to save plot")
@@ -340,7 +343,7 @@ if __name__ == "__main__":
     command_parser.set_defaults(func=do_system_correlation)
 
     command_parser = subparsers.add_parser('instance-correlation', help='Plot the system-wide correlation of a models output with truth')
-    command_parser.add_argument('-i', '--input', type=str, default="lqual_bias.json", help="Bias data")
+    command_parser.add_argument('-i', '--input', type=str, default="lqual.json", help="Bias data")
     command_parser.add_argument('-Dp', '--data-prompt', type=str, default="overall", help="An example trajectory for a task")
     command_parser.add_argument('-Dm', '--data-metric', type=str, default="sim", help="An example trajectory for a task")
     command_parser.add_argument('-o', '--output', type=str, default="instance_correlation.pdf", help="Where to save plot")
