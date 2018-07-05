@@ -84,7 +84,7 @@ def get_correlations(data):
     metrics.remove("human")
     print(systems)
 
-    sigma_table = get_variance_stats(data)
+    sigma_table = _get_variance_stats(data)
 
     agg = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     for datum in data:

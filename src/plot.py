@@ -29,6 +29,8 @@ LABELS = {
     "sim": "VecSim",
     "meteor": "METEOR",
     "bleu": "BLEU-2",
+    "bleu-2": "BLEU-2",
+    "bleu-4": "BLEU-4",
     "gold": "Upper bound",
 
     "hter": "Edit",
@@ -36,7 +38,7 @@ LABELS = {
     "msmarco": "MSMARCO",
 
     "fastqa": "fastqa",
-    "fastqa_ext": "fastqa\_ext",
+    "fastqa_ext": "fastqa_ext",
     "snet.single": "snet",
     "snet.ensemble": "snet.ens",
     "*": "Combined"
@@ -65,24 +67,24 @@ def do_correlation_table(args):
 
     X = np.array([[data[metric][system] for system in systems] for metric in metrics])
 
-    plt.rc("font", size=20)
-    plt.rc("text", usetex=True)
+    plt.rc("font", size=16)
+    plt.rc("text", usetex=False)
     #plt.rc("figure", figsize=(10,10))
 
     draw_matrix(X, with_values=True,
                 x_labels=[LABELS.get(s, s) for s in systems],
                 y_labels=[LABELS.get(m, m) for m in metrics],)
 
-    plt.colorbar(label=r"Pearson $\rho$")
+    plt.colorbar(label=r"Pearson ρ")
     plt.xlabel("Systems")
     plt.ylabel("Metrics")
 
     if args.with_title:
         task = first(key for key, values in PROMPTS.items() if prompt in values)
-        plt.title(r"Correlations on {} using the \texttt{{{}}} prompt".format(
+        plt.title(r"Correlations on {} using the {} prompt".format(
             LABELS.get(task, task),
             LABELS.get(prompt, prompt),
-            ), fontsize=16)
+            ), fontsize=14)
 
     plt.tight_layout()
     plt.savefig(args.output)
@@ -111,11 +113,11 @@ def do_trajectory(args):
     gold     = np.array(data[system, "gold", prompt, "model_variate"]["summary"])
 
     plt.rc("font", size=16)
-    plt.rc("text", usetex=True)
+    plt.rc("text", usetex=False)
     #plt.rc("figure", figsize=(10,10))
 
     plt.xlabel("Number of samples")
-    plt.ylabel(r"80\% confidence interval")
+    plt.ylabel(r"80% confidence interval")
     plt.plot(baseline.T[2] - baseline.T[1], color=colors[0], label="Humans")
     plt.plot(model.T[2] - model.T[1], color=colors[1], label="Humans + {}".format(LABELS.get(metric,metric)))
     if data_gold:
@@ -129,11 +131,11 @@ def do_trajectory(args):
 
     if args.with_title:
         task = first(key for key, values in PROMPTS.items() if prompt in values)
-        plt.title(r"\texttt{{{}}} on {} using the \texttt{{{}}} prompt".format(
+        plt.title(r"{} on {} using the {} prompt".format(
             LABELS.get(system, system),
             LABELS.get(task, task),
             LABELS.get(prompt, prompt),
-            ), fontsize=16)
+            ), fontsize=14)
 
     plt.tight_layout()
     plt.savefig(args.output)
@@ -150,8 +152,8 @@ def do_data_efficiency_table(args):
 
     X = np.array([[data[metric][prompt][system]**2 for system in systems] for metric in metrics])
 
-    plt.rc("font", size=20)
-    plt.rc("text", usetex=True)
+    plt.rc("font", size=16)
+    plt.rc("text", usetex=False)
 
     draw_matrix(X, with_values=True,
                 x_labels=[LABELS.get(s, s) for s in systems],
@@ -163,10 +165,10 @@ def do_data_efficiency_table(args):
     plt.ylabel("Metrics")
 
     if args.with_title:
-        plt.title(r"Data efficiencies on {} using the \texttt{{{}}} prompt".format(
+        plt.title(r"Data efficiencies on {} using the {} prompt".format(
             LABELS.get(task, task),
             LABELS.get(prompt, prompt),
-            ), fontsize=16)
+            ), fontsize=14)
 
 
     plt.tight_layout()
@@ -181,8 +183,8 @@ def do_system_correlation(args):
     # Group by data by system.
     data = make_bias_table(data, prompt, metric, ["lr", "ur"])
 
-    plt.rc("font", size=20)
-    plt.rc("text", usetex=True)
+    plt.rc("font", size=16)
+    plt.rc("text", usetex=False)
     plt.rc("figure", figsize=(8,6))
     colors = cm.Dark2.colors[:len(systems)]
 
@@ -212,14 +214,14 @@ def do_system_correlation(args):
     plt.scatter(xy_lr.T[0], xy_lr.T[1], color=colors, marker=">")
     plt.scatter(xy_ur.T[0], xy_ur.T[1], color=colors, marker="^")
     plt.scatter(xy.T[0], xy.T[1], 100, c=colors, marker="o")
-    plt.xlabel(r"Human judgement (\texttt{{{}}})".format(LABELS.get(prompt, prompt)))
+    plt.xlabel(r"Human judgement ({})".format(LABELS.get(prompt, prompt)))
     plt.ylabel(LABELS.get(metric, metric))
 
     if args.with_title:
         task = first(key for key, values in PROMPTS.items() if prompt in values)
         plt.title(r"System-level correlation on {}".format(
             LABELS.get(task, task),
-            ), fontsize=16)
+            ), fontsize=14)
 
     plt.tight_layout()
 
@@ -242,8 +244,8 @@ def do_instance_correlation(args):
     systems = SYSTEMS[task]
 
     # Group by data by system.
-    plt.rc("font", size=20)
-    plt.rc("text", usetex=True)
+    plt.rc("font", size=16)
+    plt.rc("text", usetex=False)
     plt.rc("figure", figsize=(6,8))
     colors = cm.Dark2.colors[:len(systems)]
 
@@ -281,7 +283,7 @@ def do_instance_correlation(args):
     for i, system in enumerate(systems):
         axs[i].text(1.2, 0.5, LABELS.get(system, system), va='center', rotation='vertical')
 
-    plt.xlabel(r"Human judgement (\texttt{{{}}})".format(LABELS.get(prompt, prompt)))
+    plt.xlabel(r"Human judgement ({})".format(LABELS.get(prompt, prompt)))
     #plt.text(-1, 0, LABELS.get(metric, metric), va="center")
     fig.text(0.01, 0.5, LABELS.get(metric, metric), va='center', rotation='vertical')
 
@@ -289,7 +291,7 @@ def do_instance_correlation(args):
         task = first(key for key, values in PROMPTS.items() if prompt in values)
         axs[0].set_title(r"Instance-level correlation on {}".format(
             LABELS.get(task, task),
-            ), fontsize=16)
+            ), fontsize=14)
 
     plt.subplots_adjust(wspace=0, hspace=0.05)
     #plt.tight_layout()
