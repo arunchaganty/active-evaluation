@@ -186,8 +186,11 @@ def do_system_correlation(args):
     plt.rc("figure", figsize=(8,6))
     colors = cm.Dark2.colors[:len(systems)]
 
+    def _thresh(y):
+        return max(min(y, 1), -1)
+
     # 0. Plot the xy correlation curve.
-    xy = np.array([[x, y] for system in systems for (x, *_), (y, *_) in [data[system]["default"]]])
+    xy = np.array([[x, _thresh(y)] for system in systems for (x, *_), (y, *_) in [data[system]["default"]]])
     xlim = np.array([xy.T[0].min(), xy.T[0].max()])
     coeffs = np.polyfit(xy.T[0], xy.T[1], 1)
     plt.plot(xlim, xlim * coeffs[0] + coeffs[1], linestyle='--', linewidth=2, zorder=-1)
@@ -249,11 +252,11 @@ def do_instance_correlation(args):
     def _thresh(y):
         return max(min(y, 1), -1)
 
-    xy = {system: np.array([[datum["prompts"][prompt]["gold"], _thresh(datum["prompts"][prompt][metric])] for datum in data if system in datum["system"].split(";")])
+    xy = {system: np.array([[_thresh(datum["prompts"][prompt]["gold"]), datum["prompts"][prompt][metric]] for datum in data if system in datum["system"].split(";")])
             for system in systems}
 
     if args.bins:
-        y = np.array([datum["prompts"][prompt]["gold"] for datum in data])
+        y = np.array([_thresh(datum["prompts"][prompt]["gold"]) for datum in data])
         distinct_values = np.linspace(y.min(), y.max(), args.bins)
         plt.xticks(distinct_values)
 
@@ -277,9 +280,9 @@ def do_instance_correlation(args):
         axs[i].scatter(x, y, alpha=0.3, marker='.', color=colors[i])
 
     for i, system in enumerate(systems):
-        xy = np.array([[datum["prompts"][prompt]["gold"], datum["prompts"][prompt][metric]] for datum in data if system in datum["system"].split(";")])
-        coeffs = np.polyfit(xy.T[0], xy.T[1], 1)
-        xlim = np.array([xy.T[0].min(), xy.T[0].max()])
+        x, y = xy[system].T[0], xy[system].T[1]
+        coeffs = np.polyfit(x, y, 1)
+        xlim = np.array([x.min(), x.max()])
         axs[i].plot(xlim, xlim * coeffs[0] + coeffs[1], linestyle='--', linewidth=1, zorder=-1, color=colors[i])
 
     for i, system in enumerate(systems):
