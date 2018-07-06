@@ -26,7 +26,8 @@ class Sent2Vec:
     def _comm(self, line):
         line = line.strip()
         self.child.sendline(line)
-        resp = self.child.readline(timeout=120).strip()
+
+        resp = self.child.readline().strip()
         #assert resp == line, "Expected {}, got {}".format(line, resp)
         #resp = self.child.readline().strip()
         return resp
@@ -36,7 +37,11 @@ class Sent2Vec:
         return np.array([float(v) for v in vec.split()])
 
     def score(self, x, y):
-        return _norm(self.embed(x)).dot(_norm(self.embed(y)))
+        try:
+            return _norm(self.embed(x)).dot(_norm(self.embed(y)))
+        except pexpect.TIMEOUT:
+            sys.stderr.write("Timed out while computing: {} {}".format(x, y))
+            return 0.
 
     def __del__(self):
         if self.child:

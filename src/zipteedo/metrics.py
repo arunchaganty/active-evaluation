@@ -56,12 +56,7 @@ def meteor(hyp, refs):
     return _m().score(hyp, refs)
 
 def sim(hyp, ref):
-    try:
-        return _s().score(hyp, ref)
-    except Exception as e:
-        sys.stderr.write("Error computing score for {} and {}: {}\n".format(hyp, ref, e)
-        return 0
-
+    return _s().score(hyp, ref)
 
 def test_metrics():
     hyps = ["Barack Obama will be the fourth president to receive the Nobel Peace Prize", "US President Barack Obama will fly to Oslo in Norway, for 26 hours and be the fourth US President in history to receive the Nobel Peace Prize."]
