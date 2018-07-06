@@ -4,6 +4,7 @@
 Routines to pre-process datasets into a canonical format.
 """
 
+import json
 import sys
 from collections import defaultdict
 from tqdm import tqdm
@@ -68,7 +69,6 @@ def do_msmarco_mean(args):
     # Pivot the data so that we know can access other entries.
     refs = {datum["id"]: datum["answer"] for datum in data if datum["system"] == "reference"}
 
-    ret = []
     for datum in tqdm(data):
         if datum["system"] == "reference": continue
 
@@ -87,8 +87,8 @@ def do_msmarco_mean(args):
                         } for key in ["AnyCorrect", "AvgCorrect",]
                     },
                 }
-            ret.append(inst)
-    save_jsonl(args.output, ret)
+            args.output.write(json.dumps(inst))
+            args.output.write("\n")
 
 def do_msmarco(args):
     # 1. Load data.
