@@ -1,7 +1,7 @@
 """
 
 """
-
+import sys
 import pyter
 from nltk.tokenize import word_tokenize
 from nltk.translate import bleu as _bleu
@@ -56,7 +56,11 @@ def meteor(hyp, refs):
     return _m().score(hyp, refs)
 
 def sim(hyp, ref):
-    return _s().score(hyp, ref)
+    try:
+        return _s().score(hyp, ref)
+    except Exception as e:
+        sys.stderr.write("Error computing score for {} and {}: {}\n".format(hyp, ref, e)
+        return 0
 
 
 def test_metrics():

@@ -26,7 +26,7 @@ class Sent2Vec:
     def _comm(self, line):
         line = line.strip()
         self.child.sendline(line)
-        resp = self.child.readline().strip()
+        resp = self.child.readline(timeout=120).strip()
         #assert resp == line, "Expected {}, got {}".format(line, resp)
         #resp = self.child.readline().strip()
         return resp
